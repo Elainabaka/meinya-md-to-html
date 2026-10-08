@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tool MD to HTML</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="mark"></span><span class="logo">MD&nbsp;&rarr;&nbsp;HTML</span></div>
+  <div class="crumb" id="crumb" title="">Ch&#432;a ch&#7885;n file</div>
+  <div class="top-right">
+    <button class="icon-btn" id="btnTheme" title="S&aacute;ng / t&#7889;i">&#9681;</button>
+    <span class="ver" id="ver">v2.1.0</span>
+  </div>
+</header>
+
+<main class="shell" id="shell">
+  <!-- 1: nguon -->
+  <section class="col col-files" id="colFiles">
+    <div class="col-head">
+      <span class="ttl">Ngu&#7891;n</span>
+      <span class="count" id="fileCount">0</span>
+      <span class="spacer"></span>
+      <button class="icon-btn sm" id="btnHide1" title="&#7842;n/hi&#7879;n c&#7897;t (Ctrl+1)">&lsaquo;</button>
+    </div>
+    <div class="col-body">
+      <div class="dropzone" id="dropzone">
+        <div class="dz-ico">&darr;</div>
+        <div class="dz-text">K&eacute;o-th&#7843; <b>.md</b> v&agrave;o &dstrok;&acirc;y</div>
+        <div class="dz-sub">ho&#7863;c d&ugrave;ng n&uacute;t b&ecirc;n d&#432;&#7899;i</div>
+      </div>
+      <div class="row btns">
+        <button id="btnAdd" class="soft">+ Th&ecirc;m file</button>
+        <button id="btnFolder" class="soft">Th&#432; m&#7909;c</button>
+        <button id="btnClear" class="ghost" title="X&oacute;a h&#7871;t danh s&aacute;ch">X&oacute;a</button>
+      </div>
+      <label class="chk sm"><input type="checkbox" id="optRec"> Qu&eacute;t th&#432; m&#7909;c con</label>
+      <input id="filter" class="filter" type="search" placeholder="L&#7885;c file&hellip; (Ctrl+K)" autocomplete="off">
+      <ul class="filelist" id="fileList"></ul>
+      <div class="list-empty" id="listEmpty">Ch&#432;a c&oacute; file .md n&agrave;o.</div>
+    </div>
+    <div class="col-foot" id="queueFoot">&mdash;</div>
+  </section>
+
+  <div class="split" id="split1" title="K&eacute;o &dstrok;&#7875; &dstrok;&#7893;i k&iacute;ch th&#432;&#7899;c &middot; double-click reset"></div>
+
+  <!-- 2: preview -->
+  <section class="col col-preview" id="colPreview">
+    <div class="prev-bar">
+      <span class="nm" id="prevName">&mdash;</span>
+      <span class="mut" id="prevStats"></span>
+      <span class="badge" id="prevBadge" hidden></span>
+      <span class="spacer"></span>
+      <span class="zoom">
+        <button class="icon-btn sm" id="btnZoomOut" title="Thu nh&#7887; (Ctrl+-)">&minus;</button>
+        <button class="icon-btn sm" id="btnZoomReset" title="100% (Ctrl+0)">100%</button>
+        <button class="icon-btn sm" id="btnZoomIn" title="Ph&oacute;ng to (Ctrl+=)">+</button>
+      </span>
+      <button class="icon-btn sm" id="btnReload" title="Render l&#7841;i (F5)">&#8635;</button>
+      <button class="icon-btn sm" id="btnOpen" title="M&#7903; HTML trong tr&igrave;nh duy&#7879;t">M&#7903; &nearr;</button>
+    </div>
+    <div class="prev-wrap">
+      <iframe id="preview" title="preview"></iframe>
+      <div class="empty-state" id="emptyState">
+        <div class="es-ico">&#128196;</div>
+        <div class="es-title">Th&#7843; file .md &dstrok;&#7875; xem tr&#432;&#7899;c</div>
+        <div class="es-sub">HTML &dstrok;&#432;&#7907;c cache t&#7921; &dstrok;&#7897;ng c&#7841;nh file g&#7889;c &mdash; kh&ocirc;ng c&#7847;n b&#7845;m Convert.</div>
+      </div>
+    </div>
+    <div class="prev-foot">
+      <span class="st" id="status">S&#7861;n s&agrave;ng.</span>
+      <div class="prog" id="prog" hidden><div class="prog-bar" id="progBar"></div></div>
+    </div>
+  </section>
+
+  <div class="split" id="split2" title="K&eacute;o &dstrok;&#7875; &dstrok;&#7893;i k&iacute;ch th&#432;&#7899;c &middot; double-click reset"></div>
+
+  <!-- 3: tuy chon -->
+  <section class="col col-opts" id="colOpts">
+    <div class="col-head">
+      <span class="ttl">Tu&#7923; ch&#7885;n</span>
+      <span class="spacer"></span>
+      <button class="icon-btn sm" id="btnHide3" title="&#7842;n/hi&#7879;n c&#7897;t (Ctrl+3)">&rsaquo;</button>
+    </div>
+    <div class="col-body">
+      <label class="fld">Ti&ecirc;u &dstrok;&#7873; <span class="mut">(1 file)</span>
+        <input id="optTitle" placeholder="Tr&#7889;ng = l&#7845;y d&ograve;ng # &dstrok;&#7847;u">
+      </label>
+      <div class="fld-row">
+        <label class="fld">Eyebrow
+          <input id="optEyebrow" value="T&agrave;i li&#7879;u k&#7929; thu&#7853;t">
+        </label>
+        <label class="fld narrow">Lang
+          <select id="optLang"><option value="vi">vi</option><option value="en">en</option></select>
+        </label>
+      </div>
+      <label class="fld">Ng&agrave;y <span class="mut">(tr&#7889;ng = h&ocirc;m nay)</span>
+        <input id="optDate" placeholder="20/09/2026">
+      </label>
+      <label class="chk"><input type="checkbox" id="optNoToc"> T&#7855;t m&#7909;c l&#7909;c</label>
+
+      <div class="sec">Cache</div>
+      <label class="chk"><input type="radio" name="cacheMode" id="cmBeside" value="beside"> C&#7841;nh file g&#7889;c</label>
+      <label class="chk"><input type="radio" name="cacheMode" id="cmTool" value="tool"> Trong th&#432; m&#7909;c tool</label>
+      <label class="chk"><input type="checkbox" id="optWatch"> T&#7921; c&#7853;p nh&#7853;t khi file &dstrok;&#7893;i</label>
+
+      <div class="sec">Xu&#7845;t</div>
+      <button id="btnExport" class="primary">Xu&#7845;t HTML&hellip;</button>
+      <button id="btnExportAll" class="soft">Xu&#7845;t t&#7845;t c&#7843;&hellip;</button>
+      <button id="btnReveal" class="soft">M&#7903; th&#432; m&#7909;c file g&#7889;c</button>
+      <button id="btnOpenFolder" class="ghost">M&#7903; th&#432; m&#7909;c xu&#7845;t</button>
+    </div>
+    <div class="col-head log-head" id="logHead">
+      <span class="ttl">Nh&#7853;t k&yacute;</span>
+      <span class="spacer"></span>
+      <span class="mut" id="logToggle">thu g&#7885;n</span>
+    </div>
+    <pre class="log" id="log"></pre>
+  </section>
+</main>
+<div class="toasts" id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>
