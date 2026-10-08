@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 chcp 65001 >nul 2>nul
 cd /d "%~dp0"
-title Tool MD to HTML
+title Meinya MD to HTML
 
 set "PY_CMD="
 where py >nul 2>nul && set "PY_CMD=py"

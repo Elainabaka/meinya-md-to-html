@@ -461,7 +461,7 @@ window.addEventListener("pywebviewready", async () => {
   setZoom(1);
   await refresh({ preview: true });
   const st = await call("initial_state").catch(() => null);
-  log("Tool MD to HTML v" + ((st && st.version) || "2.1.0") + " — cache tự động, không cần Convert.");
+  log("Meinya MD to HTML v" + ((st && st.version) || "2.1.0") + " — cache tự động, không cần Convert.");
   setInterval(poll, 1200);
 });
 })();

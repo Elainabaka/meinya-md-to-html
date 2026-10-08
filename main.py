@@ -15,7 +15,7 @@ def _fatal(root: Path, exc: Exception):
             import ctypes
             ctypes.windll.user32.MessageBoxW(
                 0,
-                f"Tool MD to HTML không thể khởi động:\n\n{exc}\n\nChi tiết: md_to_html_error.log",
+                f"Meinya MD to HTML không thể khởi động:\n\n{exc}\n\nChi tiết: md_to_html_error.log",
                 "MD to HTML · Error", 0x10)
             return
         except Exception:
@@ -88,7 +88,7 @@ def main():
     root = Path(__file__).resolve().parent
     api = MdHtmlAPI(root)
     window = webview.create_window(
-        "Tool MD to HTML",
+        "Meinya MD to HTML",
         url=(root / "web" / "index.html").as_uri(),
         js_api=api,
         width=1440,

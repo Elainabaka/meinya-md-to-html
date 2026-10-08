@@ -1,4 +1,4 @@
-# MD to HTML
+# Meinya MD to HTML
 
 Biến file Markdown (`.md`) thành trang web `.html` trình bày sẵn. Mở bằng Chrome hoặc Edge là đọc được ngay, không cần máy chủ, không cần mạng sau lần cài đầu.
 

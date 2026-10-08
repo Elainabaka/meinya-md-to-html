@@ -1,4 +1,4 @@
-"""Pure logic cho Tool MD to HTML (khong Tk, khong webview, khong dialog).
+"""Pure logic cho Meinya MD to HTML (khong Tk, khong webview, khong dialog).
 
 UI (pywebview frontend) va CLI deu goi vao day. Core render nam o md_to_html.
 """

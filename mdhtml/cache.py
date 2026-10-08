@@ -1,4 +1,4 @@
-"""Cache HTML cho Tool MD to HTML — pure stdlib, khong UI, khong dialog.
+"""Cache HTML cho Meinya MD to HTML — pure stdlib, khong UI, khong dialog.
 
 Trach nhiem:
 - Quyet dinh file .html dich (canh file .md hoac trong cache cua tool).
