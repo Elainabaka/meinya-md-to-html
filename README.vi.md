@@ -20,7 +20,7 @@ mindmap check . --lang vi
 
 `uv tool` (hoặc `pipx install git+…`) đặt lệnh `mindmap` vào PATH, thứ mà hook và phần cài cho agent bên dưới cần. `pip install git+…` cũng được, nhưng lệnh chỉ có trong môi trường bạn cài vào. Không muốn cài: tải repo này về rồi chạy `python -I run_mindmap.py check /duong/dan/toi/repo --lang vi`.
 
-Đây là kết quả với repo mẫu trong ảnh:
+Đây là kết quả của `mindmap check . --all` với repo mẫu trong ảnh (không có `--all` thì dòng `symbol-gone` là phỏng đoán, hiện thành ghi nhận):
 
 <!-- mindmap: ignore-start -->
 ```text

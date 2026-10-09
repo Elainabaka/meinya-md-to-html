@@ -20,7 +20,7 @@ mindmap check .
 
 `uv tool` (or `pipx install git+…`) puts `mindmap` on your PATH, which the hook and the agent setups below need. `pip install git+…` works too, inside the environment you install it into. Or without installing: clone this repo and run `python -I run_mindmap.py check /path/to/your-repo`.
 
-This is what it prints for the demo repo in the picture:
+This is what `mindmap check . --all` prints for the demo repo in the picture (without `--all`, the `symbol-gone` line is a guess and shows as a note):
 
 <!-- mindmap: ignore-start -->
 ```text
