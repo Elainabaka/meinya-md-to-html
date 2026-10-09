@@ -443,16 +443,23 @@ class Extractor:
             return out
         if base in PKG_RUNNERS and len(argv) > 1:
             sub = argv[1]
-            name, bare = None, False
+            name, bare, glob = None, False, False
             if sub in ("run", "run-script") and len(argv) > 2:
                 name = argv[2]
+                if name.startswith("-"):    # `bun run --parallel "*:check"`: a pattern is checked, an option is not
+                    name = next((a for a in argv[3:] if "*" in a and not has_placeholder(a.replace("*", ""))), None)
+                    glob = name is not None
+                elif base == "bun" and name.lower().endswith((".js", ".mjs", ".cjs", ".ts", ".tsx", ".mts")):
+                    path_claim(name)    # `bun run index.ts` runs a file
+                    name = None
             elif sub in ("test", "start", "stop", "restart", "t"):
                 name = "test" if sub == "t" else sub
             elif base in ("pnpm", "yarn", "bun") and sub not in PKG_BUILTINS and not sub.startswith("-"):
                 name, bare = sub, True          # a script, or a tool in node_modules/.bin
-            if name and not has_placeholder(name):
+            if name and (glob or not has_placeholder(name)):
                 out.append(Claim("npm", t, name, doc.path, line, col, ctx,
-                                 {"cwd": cwd, "builtin": sub in ("start", "stop", "restart"), "bare": bare}))
+                                 {"cwd": cwd, "builtin": sub in ("start", "stop", "restart"), "bare": bare,
+                                  "glob": glob}))
             return out
         if base in ("make", "just"):
             for a in argv[1:]:
@@ -563,6 +570,8 @@ class Extractor:
         out = []
         stack: list = []      # [(col, rel)]
         base = None
+        # `cmd/` then `client/` both at the left edge: siblings at the top, not a root folder and its child
+        tops = sum(1 for _, raw in lines if raw.strip() and raw[0] not in TREE_GLYPHS and raw[0] != "-")
         for n, raw in lines:
             if not raw.strip():
                 continue
@@ -576,7 +585,7 @@ class Extractor:
                 continue
             if base is None:
                 base_name = name.rstrip("/")
-                if i == 0 and name.endswith("/") and not any(g in raw for g in "├└│"):
+                if i == 0 and name.endswith("/") and not any(g in raw for g in "├└│") and tops == 1:
                     if posixpath.basename(ddir).lower() == base_name.lower():
                         base = ddir
                     else:

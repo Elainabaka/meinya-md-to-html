@@ -831,3 +831,67 @@ def test_the_output_after_a_prompt_in_a_code_block_is_an_example(repo):
     repo.remove("build.rs").remove("src/app.rs").write("src/cli.rs", "pub fn cli() {}\n").commit("drop")
     got = [(f.rule, f.path) for f in run(repo).findings if f.severity != "info"]
     assert got and all(p == "docs/layout.md" for _, p in got)
+
+
+def test_a_name_the_code_builds_from_a_format_string_is_alive(repo):
+    # `time_1_begin` is not written out in the code any more: `f"time_{n}_{field}"` builds it
+    repo.write("ctl.py", "def keys():\n    return {'time_1_begin': 1, 'time_1_end': 2}\n")
+    repo.write("guide.md", "# Slots\n\n| Key | Purpose |\n|---|---|\n| `time_1_begin` | start |\n"
+                           "| `time_1_end` | end |\n").commit("add")
+    repo.write("ctl.py", "def keys(n, field):\n    return {f\"time_{n}_{field}\": 1}\n").commit("build keys")
+    assert only(run(repo), "symbol-gone") == []
+
+
+def test_a_short_format_string_does_not_keep_every_name_alive(repo):
+    # `f"get_{x}"` has too few letters of its own to vouch for `get_items`
+    repo.write("api.py", "def get_items():\n    return 1\n")
+    repo.write("guide.md", "# API\n\nCall `get_items()` first.\n").commit("add")
+    repo.write("api.py", "def fetch(x):\n    return f\"get_{x}\"\n").commit("drop get_items")
+    [f] = only(run(repo), "symbol-gone")
+    assert f.claim == "get_items()"
+
+
+def test_one_name_twice_on_a_line_is_one_finding(repo):
+    repo.write("ctl.py", "def start_slot():\n    return 1\n")
+    repo.write("guide.md", "# Slots\n\n| Code key | Entity |\n|---|---|\n| `start_slot` | `start_slot` |\n").commit("add")
+    repo.write("ctl.py", "def begin_slot():\n    return 1\n").commit("rename")
+    assert len(only(run(repo), "symbol-gone")) == 1
+
+
+def test_a_pending_changeset_is_a_release_note(repo):
+    # `.changeset/*.md` (Changesets), `changelog.d/`, `newsfragments/` (towncrier), `.changes/` (changie):
+    # each tells of one change on its day, like a changelog entry
+    repo.write("src/pool.ts", "export function createManagedPool() {}\n")
+    repo.write(".changeset/fix-pool.md", "---\n\"pkg\": patch\n---\n\nFix a leak in `createManagedPool`.\n")
+    repo.write("changelog.d/42.fixed.md", "Fix a leak in `createManagedPool`.\n").commit("add")
+    repo.write("src/pool.ts", "export function createPool() {}\n").commit("rename")
+    assert [f for f in only(run(repo), "symbol-gone") if f.severity != "info"] == []
+
+
+def test_options_and_files_after_run_are_not_script_names(repo):
+    repo.write("package.json", '{"name": "x", "scripts": {"lint:check": "eslint ."}}\n')
+    repo.write("index.ts", "console.log(1)\n")
+    repo.write("README.md", "# X\n\n```bash\nbun run --parallel \"*:check\"\nbun run --parallel \"*:fix\"\nbun run index.ts\nbun run main.ts\n"
+                            "npm run deploy\n```\n").commit()
+    res = run(repo)
+    assert [(f.rule, f.claim) for f in res.findings if f.severity != "info"] == [
+        ("npm-script-missing", 'bun run --parallel "*:fix"'), ("npm-script-missing", "npm run deploy")]
+    assert {(c.target, c.status == "ok") for c in res.claims if c.target in ("index.ts", "main.ts")} == {
+        ("index.ts", True), ("main.ts", False)}
+
+
+def test_folders_at_the_left_edge_of_a_tree_are_siblings(repo):
+    # `cmd/` is the first of several top folders, not the root that holds `client/`
+    repo.write("cmd/root.go", "package cmd\n").write("client/client.go", "package client\n")
+    repo.write("ui/ui.go", "package ui\n")
+    repo.write("AGENTS.md", "# Layout\n\n```\ncmd/                 Commands\n  └── root.go        Main\n"
+                            "client/              API client\n  └── client.go      Client\nui/                  Rendering\n"
+                            "  └── ui.go          Helpers\n```\n").commit()
+    assert rules(run(repo)) == []
+
+
+def test_a_path_that_ends_an_import_of_a_library_is_the_librarys(repo):
+    repo.write("go.mod", "module example.com/x\n")
+    repo.write("pkg/api.go", 'package pkg\n\nimport "github.com/containers/podman/v5/pkg/bindings"\n')
+    repo.write("AGENTS.md", "# Notes\n\nThe API backend talks to the socket with `pkg/bindings`; see `pkg/handlers`.\n").commit()
+    assert [(f.rule, f.claim) for f in run(repo).findings] == [("path-missing", "pkg/handlers")]

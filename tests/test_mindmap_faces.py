@@ -106,14 +106,24 @@ def test_hook_doc_edit_reports_that_doc(repo):
     from mindmap.hook import post_tool
     repo.write("AGENTS.md", "# Agents\n\nSee [missing](docs/missing.md).\n")
     text = post_tool(repo.root, {"tool_name": "Write", "tool_input": {"file_path": "AGENTS.md"}})
-    assert "AGENTS.md:3" in text
+    assert "AGENTS.md:3" in text and "not a verdict" in text       # the agent reads the line before editing
+
+
+def test_mcp_check_asks_the_agent_to_read_the_line_in_context(repo):
+    from mindmap.mcp import Server
+    s = Server(repo.root)
+    call(s, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+    assert "not a verdict" not in call(s, "tools/call", {"name": "check", "arguments": {}})["result"]["content"][0]["text"]
+    repo.write("AGENTS.md", "# Agents\n\nSee [missing](docs/missing.md).\n")
+    text = call(s, "tools/call", {"name": "check", "arguments": {}})["result"]["content"][0]["text"]
+    assert "AGENTS.md:3" in text and "not a verdict" in text
 
 
 def test_hook_session_start_and_quiet_cases(repo):
     from mindmap.hook import post_tool, session_start
     assert session_start(repo.root) == ""                     # instruction files are clean
     repo.write("src/app.py", "def keep():\n    return 2\n").commit("drop build_index")
-    assert "AGENTS.md:3" in session_start(repo.root)
+    assert "AGENTS.md:3" in session_start(repo.root) and "not a verdict" in session_start(repo.root)
     assert post_tool(repo.root, {"tool_name": "Read", "tool_input": {"file_path": "AGENTS.md"}}) == ""
     assert post_tool(repo.root, {"tool_name": "Edit", "tool_input": {"file_path": "C:/elsewhere/x.py"}}) == ""
 

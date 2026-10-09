@@ -54,9 +54,13 @@ REQ_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([<>=
 PY_TEST = re.compile(r"^\s*(?:async\s+)?def\s+test\w*\s*\(", re.MULTILINE)
 JS_TEST = re.compile(r"^\s*(?:it|test)(?:\.each\([^)]*\))?\s*\(", re.MULTILINE)
 VERSION_ASSIGN = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
+STRING = re.compile(r"""(["'`])((?:\\.|(?!\1)[^\\\r\n])*)\1""")
+# a name the code builds from a format string: `f"time_{n}_{field}"`, `` `on_${evt}` ``, `"%s_total"`
+NAME_TEMPLATE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(?:(?:\$?\{[A-Za-z0-9_.]*\}|%[sdv])[A-Za-z0-9_]*)+")
+PLACEHOLDER = re.compile(r"\$?\{[A-Za-z0-9_.]*\}|%[sdv]")
 
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 STATE_SETS = ("dashed", "spelled", "imports", "local_modules")
 
 
@@ -109,7 +113,7 @@ class CodeIndex:
         st = {k: sorted(getattr(self, k)) for k in STATE_SETS}
         st.update(first_file=self.first_file, files=self.files, defs=self.defs, npm=self.npm,
                   make={k: sorted(v) for k, v in self.make.items()}, manifests=self.manifests,
-                  pins=self.pins, tests=self.tests)
+                  pins=self.pins, tests=self.tests, templates=self.templates)
         return st
 
     @classmethod
@@ -127,6 +131,7 @@ class CodeIndex:
         idx.manifests = st["manifests"]
         idx.pins = st["pins"]
         idx.tests = st["tests"]
+        idx.templates = st["templates"]
         return idx
 
     def __init__(self, inv: Inventory):
@@ -143,6 +148,7 @@ class CodeIndex:
         self.manifests: dict[str, dict] = {}     # dir -> {"file": path, "version": v}
         self.pins: dict[str, dict] = {}          # requirements/pyproject path -> {pkg: spec}
         self.tests: dict[str, int] = {}          # test file -> number of tests
+        self.templates: dict[str, list] = {}     # first 3 letters -> [[pattern, path]] of names built by format
         self._nl_text: str | None = None
         self._nl: list = []
         self._build()
@@ -171,6 +177,8 @@ class CodeIndex:
             if "-" in text:
                 self.dashed.update(DASHED.findall(text))
             self.spelled.update(SPELLED.findall(text))
+            if "{" in text or "%" in text:
+                self._templates(rel, text)
             low = rel.lower()
             name = low.rsplit("/", 1)[-1]
             if low.endswith((".py", ".pyi", ".pyw")):
@@ -221,6 +229,19 @@ class CodeIndex:
 
     def _def(self, name: str, rel: str, line: int, kind: str) -> None:
         self.defs.setdefault(name, []).append((rel, line, kind))
+
+    def _templates(self, rel: str, text: str) -> None:
+        """Names built from a format string. At least five letters of the name are written out and the first
+        three are, or `f"get_{x}"` would vouch for every `get_*` the code dropped."""
+        for lit in STRING.finditer(text):
+            for m in NAME_TEMPLATE.finditer(lit.group(2)):
+                pieces = PLACEHOLDER.split(m.group(0))
+                if len(pieces[0]) < 3 or sum(map(len, pieces)) < 5:
+                    continue
+                pattern = "[A-Za-z0-9_]+".join(map(re.escape, pieces))
+                group = self.templates.setdefault(pieces[0][:3], [])
+                if all(p != pattern for p, _ in group):
+                    group.append([pattern, rel])
 
     def _python(self, rel: str, text: str) -> None:
         # Regexes, not ast: ten times faster and good enough to say "defined here".
@@ -347,6 +368,13 @@ class CodeIndex:
     # -- queries ---------------------------------------------------------
     def has(self, name: str) -> bool:
         return name in self.first_file
+
+    def built(self, name: str) -> str | None:
+        """The file whose format string builds `name` (`f"time_{n}_{field}"` for `time_1_begin`), if any."""
+        for pattern, rel in self.templates.get(name[:3], ()):
+            if re.fullmatch(pattern, name):
+                return rel
+        return None
 
     def where(self, name: str) -> tuple | None:
         """(path, line) of the best place that mentions `name` (a definition if any)."""

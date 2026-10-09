@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from .files import is_private, kind_of
+from .model import review_note
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 AGENT_FILES = ("CLAUDE.md", "AGENTS.md", "AGENTS.override.md", "GEMINI.md", ".claude/CLAUDE.md", "CLAUDE.local.md",
@@ -142,7 +143,7 @@ def _post_file(root: Path, path: Path) -> str:
         head = (f"Mind Map checked {rel}: {len(bad)} line(s) disagree with the code or git history:"
                 if lang != "vi" else
                 f"Mind Map vừa soát {rel}: {len(bad)} dòng không khớp code hoặc lịch sử git:")
-        return "\n".join([head, *_finding_lines(bad)])
+        return "\n".join([head, *_finding_lines(bad), review_note(lang)])
     if kind == "code":
         from .impact import describe, impact
         hits = [h for h in impact(root, files=[str(path)]) if not h.plan]
@@ -173,7 +174,7 @@ def session_start(root: Path) -> str:
             f"trust the code over them:"
             if lang != "vi" else
             f"Mind Map: {len(bad)} dòng trong file hướng dẫn vừa nạp đã cũ; tin code hơn các dòng này:")
-    return "\n".join([head, *_finding_lines(bad)])
+    return "\n".join([head, *_finding_lines(bad), review_note(lang)])
 
 
 def _failed(base: Path | None, err: Exception) -> str:

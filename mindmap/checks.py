@@ -149,6 +149,7 @@ class Checker:
         self.load_doc = load_doc
         self.paths = PathIndex(inv)
         self.findings: list[Finding] = []
+        self._reported: dict = {}           # (fingerprint, line) -> the finding already made
         self.external = stdlib_names() | set(index.imports) | JS_GLOBALS
         self._now = time.time()
         self._docusaurus_sites = sorted(
@@ -202,7 +203,12 @@ class Checker:
         evidence = [{k: v for k, v in e.items() if v != ""} for e in evidence]
         f = Finding(rule, sev, path, line, col, msg, claim_text, evidence, suggestion,
                     fingerprint(rule, path, claim_text, line_text))
-        self.findings.append(f)
+        key = (f.fingerprint, line)
+        if key in self._reported:       # one name in two cells of a table row: one finding
+            f = self._reported[key]
+        else:
+            self._reported[key] = f
+            self.findings.append(f)
         if c is not None:
             c.status = "broken" if sev in (ERROR, WARNING) else c.status
         return f
@@ -893,6 +899,10 @@ class Checker:
                 for match in re.finditer(r'''(["'`])((?:\\.|(?!\1)[^\\\r\n])*)\1''', text):
                     literal = match.group(2).replace("\\", "/")
                     self._path_strings.add(posixpath.normpath(literal))
+                    if "/" in literal and not any(ch.isspace() for ch in literal):
+                        # `pkg/bindings` of `"github.com/containers/podman/v5/pkg/bindings"`: a library's package
+                        parts = literal.strip("/").split("/")
+                        self._path_strings.update("/".join(parts[k:]) for k in range(1, len(parts) - 1))
         return not ({posixpath.normpath(target), posixpath.basename(target)} & self._path_strings)
 
     def _near(self, c: Claim) -> str | None:
@@ -1179,11 +1189,16 @@ class Checker:
                 c.status = "external"
                 continue
             missing = [p for p in parts if not self.index.has(p)]
+            built = [self.index.built(p) for p in missing]
+            if all(built):          # the code builds them from a format string: `f"time_{n}_{field}"`
+                missing = []
             if not missing:
                 c.status = "ok"
                 w = self.index.defs.get(c.target)
                 if w:
                     c.where = f"{w[0][0]}:{w[0][1]}"
+                elif built:
+                    c.where = built[0]
                 continue
             if self.acknowledged(c):
                 c.status = "acknowledged"
@@ -1362,14 +1377,18 @@ class Checker:
                 if not pj or pj not in self.index.npm:
                     c.status = "external"
                     continue
-                if c.target in self.index.npm[pj]["scripts"] or (c.extra.get("builtin") and c.target != "test"):
+                def has(scripts, c=c) -> bool:
+                    if c.extra.get("glob"):     # `bun run --parallel "*:check"` runs every script the pattern fits
+                        return any(fnmatch.fnmatchcase(s, c.target) for s in scripts)
+                    return c.target in scripts
+                if has(self.index.npm[pj]["scripts"]) or (c.extra.get("builtin") and c.target != "test"):
                     c.status, c.where = "ok", pj
                     continue
                 if c.extra.get("bare"):
                     c.status = "external"       # `pnpm vite`, `yarn patch`: a tool of the project or of the runner
                     continue
                 repo = self.inv.repo_of(pj)
-                other = next((p for p in sorted(self.index.npm) if c.target in self.index.npm[p]["scripts"]
+                other = next((p for p in sorted(self.index.npm) if has(self.index.npm[p]["scripts"])
                               and self.inv.repo_of(p) == repo), None)
                 if other:
                     c.status, c.where = "ok", other     # a workspace: the line is about another package of the repo

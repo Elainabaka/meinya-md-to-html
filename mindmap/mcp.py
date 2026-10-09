@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import __version__
 from .files import git_trouble
+from .model import review_note
 
 MODERN = ["2026-07-28"]
 LEGACY = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
@@ -113,7 +114,9 @@ def prompt_text(name: str, args: dict) -> str:
     if name == "fix-drift":
         path = args.get("path") or "the whole repository"
         return (f"Call the Mind Map `check` tool on {path} (severity warning). For every finding, read the "
-                "evidence (file, line, commit) and fix the doc so it matches the code. If the code is the "
+                "evidence (file, line, commit) and the doc line in its context, then fix the doc so it matches "
+                "the code. If the line is right in its context (another project's tool, an example, a past "
+                "plan), leave it and say why. If the code is the "
                 "thing that is wrong, do not touch it: list it for the user instead. Keep each fix to the "
                 "smallest edit, then run `check` again until it reports nothing new.")
     if name == "critic":
@@ -173,6 +176,8 @@ class Server:
             lines.append(line)
         if len(shown) > limit:
             lines.append(f"... {len(shown) - limit} more (raise `limit`)")
+        if shown:
+            lines.append(review_note("en"))
         if report.incomplete(res):
             lines.append("! " + report.incomplete(res))
         data = {"stats": s, "total": len(shown), "findings": [f.to_dict() for f in shown[:limit]]}

@@ -28,6 +28,7 @@ HISTORY_DIR = re.compile(
     r"adr|adrs|decisions|decision-records|research|pinned|vendor|third[-_]?party|jobs|runs|"
     r"experiments?|thi[-_]?nghiem|fixtures?|testdata|templates?|scaffold|boilerplate|prompts?|\d{4}-\d{2}-\d{2}[^/]*|"
     r"done|completed|complete|implemented|shipped|superseded|obsolete|finished|"
+    r"\.changesets?|\.changes|changelog\.d|newsfragments|release[-_]?notes|releasenotes|"    # one entry per change
     r"(?:tests?|__tests__|testsuite)/[^/]+/[^/]+|versioned_docs[^/]*)/", re.I)     # deep in a test folder: a test's input; Docusaurus snapshots
 VERSION_DIR = re.compile(r"^(?:v(\d+(?:\.\d+)*)|version[-_]?(\d+(?:\.\d+)*)(?:\.x)?|(\d+\.(?:\d+|x)(?:\.\d+)*))$", re.I)
 POST_DIR = re.compile(r"(?:^|/)(?:blogs?|news|posts|_posts|articles|announcements?)/", re.I)
