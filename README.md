@@ -120,7 +120,7 @@ Mind Map: 3 line(s) in the instruction files you just read are out of date; trus
 ```
 <!-- mindmap: ignore-end -->
 
-The hook never blocks an edit. On any problem it prints nothing and exits 0.
+The hook never blocks an edit and always exits 0. If it cannot check, it says so in one line, so no message means nothing was found. It works from the project root Claude Code gives hooks (`CLAUDE_PROJECT_DIR`), not from the folder the agent last moved into.
 
 **An MCP server.** `mindmap mcp` speaks the Model Context Protocol on stdio, in both the 2024 to 2025 form (`initialize`) and the 2026-07-28 form (`server/discover`). It is read-only.
 
@@ -246,7 +246,7 @@ A second experiment: rename one class in starlette (`CORSMiddleware` to `CorsMid
 - Names in code are found with a text index and patterns for definitions in more than thirty languages, not with a parser for each. A definition written in an unusual way is missed, and then Mind Map stays quiet.
 - A shallow clone has less history, so it gives fewer findings (never more). In CI, fetch the full history.
 - If git does not answer in time (each call has a hard time limit, and after three timeouts in one run it stops asking), the report says how many questions went unanswered: a `!` line, `stats.git_unanswered` in JSON, a line on stderr. Such a report may miss findings: run it again. The exit code still follows the findings only.
-- Status: 0.1.0, alpha. It needs Python 3.11 or newer and git. Tested on Windows (Python 3.11, 3.12, 3.13) and Linux (Python 3.14): 146 tests, 89 of them for Mind Map (on Linux the 24 tests of the desktop app were skipped: no pywebview there). Not tested yet: macOS.
+- Status: 0.1.0, alpha. It needs Python 3.11 or newer and git. Tested on Windows (Python 3.11, 3.12, 3.13) and Linux (Python 3.14): 150 tests, 93 of them for Mind Map (on Linux the 24 tests of the desktop app were skipped: no pywebview there). Not tested yet: macOS.
 
 ## Safety
 
