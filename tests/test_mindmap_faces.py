@@ -150,6 +150,15 @@ def test_impact_ignores_names_still_defined_elsewhere(repo):
     assert impact(repo.root) == []
 
 
+def test_impact_skips_docs_marked_history_in_the_doc_or_the_config(repo):
+    from mindmap.impact import impact
+    repo.write(".mindmap.toml", 'history = ["notes/**"]\n')
+    repo.write("PROMPT_SENT.md", "<!-- mindmap: history -->\n# Old prompt\n\nCall `build_index()` first.\n")
+    repo.write("notes/old.md", "# Old\n\nCall `build_index()` first.\n").commit("notes")
+    repo.write("src/app.py", "def keep():\n    return 2\n")
+    assert [h.doc for h in impact(repo.root)] == ["AGENTS.md"]
+
+
 def test_cost_counts_tokens_and_stale_lines(repo):
     from mindmap.cost import estimate_tokens, measure
     assert estimate_tokens("abcd" * 10) == 10
@@ -171,6 +180,12 @@ def test_context_marks_stale_lines(repo):
     repo.write("src/app.py", "def keep():\n    return 2\n").commit("drop")
     pack = build(repo.root, "agents build_index", budget=400)
     assert "[stale]" in pack["text"]
+
+
+def test_mcp_context_puts_the_text_in_the_structured_result(repo):
+    from mindmap.mcp import Server
+    res = call(Server(repo.root), "tools/call", {"name": "context", "arguments": {"query": "install setup"}})["result"]
+    assert "Install the tool" in res["structuredContent"]["text"]
 
 
 # -- reports and CLI --------------------------------------------------------------------

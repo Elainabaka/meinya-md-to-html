@@ -88,6 +88,7 @@ class Doc:
     prose: list = field(default_factory=list)    # [(line_no, text)] outside fences/comments
     ignored: set = field(default_factory=set)
     ignore_file: bool = False
+    kind_mark: str = ""          # `<!-- mindmap: history -->` (or plan, live): how to read this doc
     anchors: set = field(default_factory=set)
 
     def line_text(self, n: int) -> str:
@@ -233,6 +234,8 @@ def scan(path: str, text: str) -> Doc:
             low = body.lower()
             if low == "ignore-file":
                 doc.ignore_file = True
+            elif low in ("history", "plan", "live"):
+                doc.kind_mark = low
             elif low == "ignore-start":
                 ignore_range = True
             elif low == "ignore-end":

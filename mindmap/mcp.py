@@ -198,7 +198,9 @@ class Server:
     def tool_context(self, args: dict) -> tuple:
         from .context import build
         pack = build(self.root, args["query"], int(args.get("budget") or 2000))
-        return pack["text"], {"sections": pack["sections"], "tokens": pack["tokens"]}
+        # the text goes in the structured result too: a client that shows only structuredContent
+        # (Claude Code does) would otherwise get line numbers without the lines
+        return pack["text"], {"text": pack["text"], "sections": pack["sections"], "tokens": pack["tokens"]}
 
     def tool_cost(self, args: dict) -> tuple:
         from .cost import measure, render

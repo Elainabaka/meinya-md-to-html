@@ -115,7 +115,7 @@ def run(root, *, lang: str | None = None, use_git: bool = True, nested: bool | N
     dec = Decisions()
     dec.load(docs)
 
-    kinds = {p: classify(p, cfg) for p in docs}
+    kinds = {p: classify(p, cfg, d.kind_mark) for p, d in docs.items()}
     t = time.perf_counter()
     ext = Extractor(dec.regex, dec.logs, root_abs=str(root))
     claims = []

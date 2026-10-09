@@ -161,7 +161,11 @@ def _mentions_name(text: str, name: str) -> bool:
 def impact(root, files: list | None = None, since: str = "HEAD") -> list:
     """Doc lines that mention what the given (or all changed) code files lost."""
     from .checks import GONE_WORDS
+    from .engine import load_config
+    from .mdscan import scan
     root = Path(root).resolve()
+    cfg = load_config(root)
+    kinds: dict[str, str] = {}          # doc -> live | plan | history, read once per doc that has a hit
     by_top: dict[Path, list] = {}
     if files:
         for f in files:
@@ -221,7 +225,13 @@ def impact(root, files: list | None = None, since: str = "HEAD") -> list:
             doc = _rel(top / d, root)
             if doc is None or doc.startswith(".."):
                 continue
-            kind_doc = classify(doc)
+            if doc not in kinds:
+                try:
+                    body = (top / d).read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    body = ""
+                kinds[doc] = classify(doc, cfg, scan(doc, body).kind_mark)
+            kind_doc = kinds[doc]
             if kind_doc == "history" or GONE_WORDS.search(text):
                 continue
             if is_name and not _mentions_name(text, term):

@@ -225,6 +225,29 @@ def test_history_docs_only_check_decisions(repo):
     assert run(repo).findings == []
 
 
+def test_a_doc_marked_history_only_checks_decisions(repo):
+    old = "# Prompt I sent\n\nRun `src/old_name.py`, see [notes](notes.md).\n"
+    repo.write("src/old_name.py", "x = 1\n")
+    repo.write("docs/prompt.md", "<!-- mindmap: history -->\n" + old)
+    repo.write("docs/same.md", old).commit()
+    repo.mv("src/old_name.py", "src/new_name.py")
+    repo.commit("rename")
+    assert {f.path for f in run(repo).findings if f.severity != "info"} == {"docs/same.md"}
+
+
+def test_the_mark_in_the_doc_wins_over_its_name_and_the_config(repo):
+    from mindmap.doctype import classify
+    repo.write("CHANGELOG.md", "# Changelog\n\n<!-- mindmap: live -->\nSee [notes](notes.md).\n").commit()
+    assert [(f.rule, f.line) for f in run(repo).findings] == [("link-broken", 4)]
+    assert classify("README.md", {"live": ["README.md"]}, "history") == "history"
+    assert classify("README.md", {}, "") == "live"
+
+
+def test_a_history_mark_written_as_code_is_not_obeyed(repo):
+    repo.write("README.md", "# A\n\nWrite `<!-- mindmap: history -->` in an old doc.\n\nSee [x](missing.md).\n").commit()
+    assert [(f.rule, f.line) for f in run(repo).findings] == [("link-broken", 5)]
+
+
 def test_done_rows_are_capped_at_info(repo):
     repo.write("src/app.py", "x = 1\n")
     repo.write("ROADMAP.md", "# Roadmap\n\n| Task | Status |\n|---|---|\n| Write `src/app.py` | DONE |\n").commit()

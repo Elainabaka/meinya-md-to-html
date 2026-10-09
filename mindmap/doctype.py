@@ -7,7 +7,9 @@
   point in time; drift is reported as info only.
 - live: everything else (README, AGENTS.md, CLAUDE.md, guides...). Full checks.
 
-Overridable with `history`, `plans` and `live` globs in .mindmap.toml.
+Overridable with `history`, `plans` and `live` globs in .mindmap.toml, and in
+the doc itself with `<!-- mindmap: history -->` (or `plan`, `live`), which wins
+over both: an old prompt or a pasted chat says what kind it is where it is.
 """
 
 from __future__ import annotations
@@ -37,7 +39,9 @@ def is_post(path: str) -> bool:
     return POST_DIR.search(path) is not None
 
 
-def classify(path: str, cfg: dict | None = None) -> str:
+def classify(path: str, cfg: dict | None = None, mark: str = "") -> str:
+    if mark in ("live", "plan", "history"):
+        return mark
     cfg = cfg or {}
     if cfg.get("live") and match_any(path, cfg["live"]):
         return "live"

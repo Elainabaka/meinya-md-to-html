@@ -48,8 +48,10 @@ def build(root, query: str, budget: int = 2000) -> dict:
     cfg = load_config(root)
     inv = Inventory(root)
     items = []                      # (doc, start, end, title, tokens Counter, length)
+    kinds = {}
     for p in inv.docs:
         d = scan(p, inv.text(p) or "")
+        kinds[p] = classify(p, cfg, d.kind_mark)
         for a, b, title in sections(p, d):
             body = "\n".join(d.lines[a - 1:b])
             toks = words(p.replace("/", " ") + " " + title + " " + body)
@@ -73,7 +75,7 @@ def build(root, query: str, budget: int = 2000) -> dict:
             idf = math.log(1 + (n - df[w] + 0.5) / (df[w] + 0.5))
             s += idf * tf[w] * 2.5 / (tf[w] + 1.5 * (0.25 + 0.75 * length / avg))
         if s > 0:
-            scored.append((s * WEIGHT[classify(it[0], cfg)], it))
+            scored.append((s * WEIGHT[kinds[it[0]]], it))
     scored.sort(key=lambda x: -x[0])
     chosen, used = [], 0
     for s, it in scored:
