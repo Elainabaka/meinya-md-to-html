@@ -17,8 +17,11 @@ ATX = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 SETEXT_EQ = re.compile(r"^\s{0,3}=+\s*$")
 SETEXT_DASH = re.compile(r"^\s{0,3}-+\s*$")
 TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$")
+# a line that starts another block and so ends a table: indented code, quote, list item, rule, HTML
+TABLE_BREAK = re.compile(r"^(?: {4}|\t)|^\s{0,3}(?:>|[-+*](?:\s|$)|\d{1,9}[.)](?:\s|$)|<[A-Za-z/!?]"
+                         r"|(?:\*\s*){3,}$|(?:-\s*){3,}$|(?:_\s*){3,}$)")
 LINK = re.compile(r"(!?)\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)")
-REF_DEF = re.compile(r"^\s{0,3}\[([^\]]+)\]:\s*(<[^>]+>|\S+)")
+REF_DEF = re.compile(r"^\s{0,3}\[(?!\^)([^\]]+)\]:\s*(<[^>]+>|\S+)")     # `[^1]: text` is a footnote, not a link
 DIRECTIVE = re.compile(r"<!--\s*mindmap\s*:\s*(.*?)\s*-->", re.IGNORECASE)
 # `<a name="x">`, `<h3 id="x">`, `<div id=x>`: any tag can carry the anchor a link jumps to
 HTML_ID = re.compile(r"""<[A-Za-z][\w-]*\s+[^>]*?\b(?:name|id)\s*=\s*["']?([^"'\s>]+)""", re.IGNORECASE)
@@ -298,6 +301,9 @@ def scan(path: str, text: str) -> Doc:
                 table.rows.append((n, len(split_cells(visible))))
             elif table is None and len(split_cells(visible)) >= 2:
                 doc.orphan_rows.append(n)
+        elif table is not None and stripped and not TABLE_BREAK.match(visible):
+            # GFM: a row needs no leading `|`; only a blank line or another block ends the table
+            table.rows.append((n, len(split_cells(visible))))
         else:
             table = None
 

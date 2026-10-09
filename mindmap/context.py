@@ -40,7 +40,7 @@ def sections(path: str, doc) -> list:
 
 
 def build(root, query: str, budget: int = 2000) -> dict:
-    from .doctype import classify
+    from .doctype import classify, old_versions
     from .engine import load_config, run
     from .files import Inventory
     from .mdscan import scan
@@ -49,9 +49,10 @@ def build(root, query: str, budget: int = 2000) -> dict:
     inv = Inventory(root)
     items = []                      # (doc, start, end, title, tokens Counter, length)
     kinds = {}
+    older = old_versions(inv.docs)
     for p in inv.docs:
         d = scan(p, inv.text(p) or "")
-        kinds[p] = classify(p, cfg, d.kind_mark)
+        kinds[p] = classify(p, cfg, d.kind_mark, p in older)
         for a, b, title in sections(p, d):
             body = "\n".join(d.lines[a - 1:b])
             toks = words(p.replace("/", " ") + " " + title + " " + body)

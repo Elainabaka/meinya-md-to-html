@@ -205,10 +205,17 @@ def test_table_broken_by_a_blank_line(repo):
     assert "blank line 6" in f.suggestion
 
 
-def test_table_cut_by_a_line_break_in_a_cell(repo):
+def test_a_line_break_in_a_cell_makes_a_short_row_not_two_tables(repo):
+    # GFM (GitHub, VS Code, markdown-it) runs a table on over a line without a leading `|`
     repo.write("README.md", "# T\n\n| a | b |\n|---|---|\n| 1 | two\nlines |\n| 3 | 4 |\n| 5 | 6 |\n").commit()
     [f] = run(repo).findings
-    assert f.rule == "table-orphan" and "join line 6 onto line 5" in f.suggestion
+    assert (f.rule, f.severity, f.line) == ("table-shape", "info", 6)
+
+
+def test_a_table_row_needs_no_leading_pipe(repo):
+    repo.write("README.md", "# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n`x` used|y|\n| 3 | 4 |\n| 5 | 6 |\n"
+                            "\n| a | b |\n|---|---|\n| 1 | 2 |\n- a list ends it\n").commit()
+    assert run(repo).findings == []
 
 
 # -- doc types --------------------------------------------------------------------
@@ -633,3 +640,117 @@ def test_a_line_defines_a_name_or_only_uses_it():
     assert [x for x in ONLY_USED if defines(*x)] == []
     assert defines("build_index()", "build_index", "bin/run") and not defines("build_index()", "build_index", "app.py")
     assert not defines("var RegexSet=1;" + "function a(b){return c(b,d)};" * 5000, "RegexSet")      # a minified bundle
+
+
+# -- seen on ten repos it had never met (09/10/2026) ---------------------------------
+
+def test_a_site_link_to_index_html_finds_the_folders_readme(repo):
+    # mdBook and GitBook build `theme/README.md` into `theme/index.html`
+    repo.write("guide/src/format/theme/README.md", "# Theme\n")
+    repo.write("guide/src/README.md", "# Book\n\nSee the [theme](format/theme/index.html).\n").commit()
+    assert run(repo).findings == []
+
+
+def test_a_page_deep_in_a_test_folder_is_a_tests_input(repo):
+    repo.write("tests/suite/missing_file/src/SUMMARY.md", "# Summary\n\n- [Chapter](./chapter_1.md)\n")
+    repo.write("tests/README.md", "# Tests\n\nSee [the helpers](helpers.md).\n").commit()
+    assert rules(run(repo)) == [("link-broken", "error", "tests/README.md", 3)]
+
+
+def test_a_flag_a_library_spells_without_dashes_is_alive(repo):
+    repo.write("completion/task.bash", "opts='--silent --remote-cache-dir --dry'\n")
+    repo.write("flags.go", 'package flags\n\nfunc init() {\n\tpflag.BoolVarP(&Silent, "silent", "s", false, "")\n}\n')
+    repo.write("src/cli.rs", "struct Cli {\n    #[arg(long)]\n    remote_cache_dir: Option<String>,\n}\n")
+    repo.write("README.md", "# Task\n\nUse `--silent` to hush it, `--remote-cache-dir` to move the cache.\n").commit("add")
+    repo.write("completion/task.bash", "opts='--dry'\n").commit("trim")
+    assert run(repo).findings == []
+
+
+def test_a_flag_whose_script_left_the_repo_is_a_note(repo):
+    repo.write("get-tool.py", "import argparse\np = argparse.ArgumentParser()\np.add_argument('--uninstall')\n")
+    repo.write("README.md", "# Tool\n\nRun the installer again with the `--uninstall` option.\n").commit("add")
+    repo.remove("get-tool.py").commit("installer lives in its own repo")
+    [f] = run(repo).findings
+    assert (f.rule, f.severity) == ("flag-removed", "info")
+
+
+def test_a_name_the_pages_own_example_declares_is_the_examples(repo):
+    repo.write("theme/link.js", "export function render(activeClass) {\n  return activeClass\n}\n")
+    repo.write("guide.md", "# Classes\n\n```js\nconst activeClass = ref('active')\n```\n\n"
+                           "`activeClass` is applied when the link is active.\n").commit("add")
+    repo.write("theme/link.js", "export function render(cls) {\n  return cls\n}\n").commit("new theme")
+    assert only(run(repo), "symbol-gone") == []
+
+
+def test_a_page_that_says_its_feature_was_removed_is_a_record(repo):
+    repo.write("src/app.py", "def build_index():\n    return 1\n")
+    repo.write("guide.md", "# Index builder\n\n> This feature has been removed in 3.4.\n\n## Use\n\n"
+                           "Call `build_index()` first.\n").commit("add")
+    repo.write("src/app.py", "def make_index():\n    return 1\n").commit("rename function")
+    [f] = only(run(repo), "symbol-gone")
+    assert f.severity == "info"
+
+
+def test_a_path_is_read_from_the_folder_of_the_page_it_starts_with(repo):
+    # a page of the `next` docs names `docs/guide.md`: not the `latest` docs' page of that name
+    repo.write("site/latest/docs/guide.md", "# Guide\n")
+    repo.write("site/next/docs/guide/index.md", "# Guide\n")
+    repo.write("site/next/docs/contributing.md", "# Contributing\n\n"
+                                                 "The build moves `docs/guide/index.md` to `docs/guide.md`.\n").commit("add")
+    repo.remove("site/latest/docs/guide.md").commit("latest docs: guide becomes a folder")
+    assert run(repo).findings == []
+
+
+def test_make_pattern_rules_and_open_makefiles_take_any_target(repo):
+    repo.write("Makefile", "test-%:\n\tcargo test $*\n")
+    repo.write("tools/Makefile", "%:\n\tgo run build.go $*\n")
+    repo.write("web/Makefile", "include rules.mk\n")
+    repo.write("README.md", "# X\n\n`make test-full`, `make clippy-full`.\n")
+    repo.write("tools/README.md", "# Tools\n\n`make v3approve`.\n")
+    repo.write("web/README.md", "# Web\n\n`make serve`.\n").commit()
+    got = [(f.rule, f.path, f.claim) for f in run(repo).findings]
+    assert got == [("make-target-missing", "README.md", "make clippy-full")]
+
+
+def test_a_footnote_is_not_a_link(repo):
+    repo.write("README.md", "# X\n\nTags are signed.[^1]\n\n[^1]: This was not always true.\n").commit()
+    assert run(repo).findings == []
+
+
+def test_two_pages_that_differ_only_in_version_numbers_are_not_copies(repo):
+    line = "This guide covers every change you need to make when you move from version {} to version {} of the package.\n"
+    repo.write("docs/migrate-v1-to-v2.md", "# Migrate\n\n" + line.format(1, 2)).commit("v2")
+    repo.write("docs/migrate-v2-to-v3.md", "# Migrate\n\n" + line.format(2, 3)).commit("v3")
+    assert run(repo).findings == []
+
+
+def test_the_docs_of_an_older_version_are_a_record(repo):
+    repo.write("app.go", "package cli\n\nfunc EnableBashCompletion() {}\n")
+    for v in ("v1", "v2"):
+        repo.write(f"docs/{v}/completion.md", "# Completion\n\nCall `EnableBashCompletion` first.\n")
+    repo.commit("add")
+    repo.write("app.go", "package cli\n\nfunc EnableShellCompletion() {}\n").commit("v3")
+    repo.write("docs/v3/completion.md", "# Completion\n\nCall `EnableShellCompletion` first.\n").commit("v3 docs")
+    assert run(repo).findings == []
+    from mindmap.doctype import old_versions
+    assert old_versions(["docs/v1/a.md", "docs/v3/a.md", "docs/v10/a.md", "notes/2/a.md", "x/version-2.x/a.md"]) \
+        == {"docs/v1/a.md", "docs/v3/a.md"}
+
+
+def test_a_dated_post_and_a_translation_only_note_what_the_code_dropped(repo):
+    repo.write("src/app.py", "def build_index():\n    return 1\n")
+    repo.write("docs/en/guide.md", "# Guide\n\nCall `build_index()` first.\n")
+    repo.write("docs/ko/guide.md", "# 안내\n\n먼저 `build_index()` 를 호출하세요.\n")
+    repo.write("website/blog/2018-07-29-1.14.md", "# 1.14\n\nCall `build_index()` first.\n").commit("add")
+    repo.write("src/app.py", "def make_index():\n    return 1\n").commit("rename function")
+    got = sorted((f.path, f.severity) for f in only(run(repo), "symbol-gone"))
+    assert got == [("docs/en/guide.md", "warning"), ("docs/ko/guide.md", "info"),
+                   ("website/blog/2018-07-29-1.14.md", "info")]
+
+
+def test_a_place_the_reader_is_told_to_use_is_in_their_project(repo):
+    repo.write("docs/public/_headers", "x\n")
+    repo.write("docs/guide/deploy.md", "# Deploy\n\nThe file should be placed in the public folder - in our case, "
+                                       "`docs/public/_headers`.\nRead `docs/public/_headers` for the rules.\n").commit("add")
+    repo.remove("docs/public/_headers").commit("drop headers")
+    assert [(f.rule, f.line) for f in run(repo).findings] == [("path-moved", 4)]

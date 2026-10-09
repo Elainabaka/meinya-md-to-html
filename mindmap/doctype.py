@@ -26,7 +26,9 @@ HISTORY_NAME = re.compile(
 HISTORY_DIR = re.compile(
     r"(?:^|/)(?:archive|archived|_archive|attic|old|legacy|deprecated|history|luu[-_ ]?tru|_cu[^/]*|"
     r"adr|adrs|decisions|decision-records|research|pinned|vendor|third[-_]?party|jobs|runs|"
-    r"experiments?|thi[-_]?nghiem|fixtures?|testdata|templates?|scaffold|boilerplate|prompts?|\d{4}-\d{2}-\d{2}[^/]*)/", re.I)
+    r"experiments?|thi[-_]?nghiem|fixtures?|testdata|templates?|scaffold|boilerplate|prompts?|\d{4}-\d{2}-\d{2}[^/]*|"
+    r"(?:tests?|__tests__|testsuite)/[^/]+/[^/]+|versioned_docs)/", re.I)     # deep in a test folder: a test's input; Docusaurus snapshots
+VERSION_DIR = re.compile(r"^(?:v(\d+(?:\.\d+)*)|version[-_]?(\d+(?:\.\d+)*)(?:\.x)?|(\d+\.(?:\d+|x)(?:\.\d+)*))$", re.I)
 POST_DIR = re.compile(r"(?:^|/)(?:blogs?|news|posts|_posts|articles|announcements?)/", re.I)
 PLAN_NAME = re.compile(
     r"(?:^|[_\-. ])(?:plan|plans|proposal|rfc|draft|todo|ideas?|spike|brainstorm|wip|"
@@ -39,7 +41,34 @@ def is_post(path: str) -> bool:
     return POST_DIR.search(path) is not None
 
 
-def classify(path: str, cfg: dict | None = None, mark: str = "") -> str:
+def _version(seg: str) -> tuple | None:
+    m = VERSION_DIR.match(seg)
+    if not m:
+        return None
+    return tuple(int(x) if x.isdigit() else 0 for x in (m.group(1) or m.group(2) or m.group(3)).split("."))
+
+
+def old_versions(paths) -> set:
+    """Docs under the folder of an older version (`docs/v1/`, `docs/v2/` next to `docs/v3/`): the guide
+    of a release that still works as it did, not of the code in the tree."""
+    seen: dict = {}
+    for p in paths:
+        segs = p.split("/")[:-1]
+        for i, seg in enumerate(segs):
+            v = _version(seg)
+            if v is not None:
+                seen.setdefault("/".join(segs[:i]), {})[seg] = v
+    old = {(parent, seg) for parent, vs in seen.items() if len(vs) >= 2
+           for seg, v in vs.items() if v < max(vs.values())}
+    out = set()
+    for p in paths:
+        segs = p.split("/")[:-1]
+        if any(("/".join(segs[:i]), seg) in old for i, seg in enumerate(segs)):
+            out.add(p)
+    return out
+
+
+def classify(path: str, cfg: dict | None = None, mark: str = "", old_version: bool = False) -> str:
     if mark in ("live", "plan", "history"):
         return mark
     cfg = cfg or {}
@@ -49,6 +78,8 @@ def classify(path: str, cfg: dict | None = None, mark: str = "") -> str:
         return "history"
     if cfg.get("plans") and match_any(path, cfg["plans"]):
         return "plan"
+    if old_version:
+        return "history"
     name = path.rsplit("/", 1)[-1]
     stem = name.rsplit(".", 1)[0]
     if HISTORY_DIR.search(path) or HISTORY_NAME.search(stem):

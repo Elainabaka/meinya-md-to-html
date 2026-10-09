@@ -32,6 +32,8 @@ def newlines(text: str) -> list:
 
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 DASHED = re.compile(r"(?<![\w-])--?[A-Za-z][A-Za-z0-9_-]*")
+# a whole string that a flag library may turn into `--name`: Go's flag/pflag, clap, getopt_long, yargs
+SPELLED = re.compile(r"""(?<![\w\\])["'`]([A-Za-z][A-Za-z0-9_-]{1,39})["'`]""")
 JS_IMPORT = re.compile(r"""(?:from\s+|require\(\s*|import\(\s*|import\s+)["']([^"'./][^"']*)["']""")
 JS_DEF = re.compile(
     r"(?:function\s*\*?\s+([A-Za-z_$][\w$]*)|class\s+([A-Za-z_$][\w$]*)"
@@ -44,7 +46,9 @@ GENERIC_DEF = re.compile(
 )
 PS_FUNC = re.compile(r"^\s*function\s+([A-Za-z][\w-]*)", re.IGNORECASE | re.MULTILINE)
 BAT_LABEL = re.compile(r"^:([A-Za-z_][\w-]*)", re.MULTILINE)
-MAKE_TARGET = re.compile(r"^([A-Za-z0-9_.][A-Za-z0-9_./-]*)\s*:(?!=)", re.MULTILINE)
+MAKE_TARGET = re.compile(r"^([A-Za-z0-9_.%][A-Za-z0-9_./%-]*)\s*:(?!=)", re.MULTILINE)
+# targets a Makefile names through a variable or brings in from another file: any name may be one
+MAKE_OPEN = re.compile(r"^(?:\$[({][^\n:=]*:(?!=)|-?include\s)", re.MULTILINE)
 JUST_RECIPE = re.compile(r"^@?([A-Za-z0-9_-]+)(?:\s+[^:=\n]*)?:(?!=)", re.MULTILINE)
 REQ_LINE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([<>=!~].*?)?\s*(?:;.*)?(?:#.*)?$")
 PY_TEST = re.compile(r"^\s*(?:async\s+)?def\s+test\w*\s*\(", re.MULTILINE)
@@ -52,8 +56,8 @@ JS_TEST = re.compile(r"^\s*(?:it|test)(?:\.each\([^)]*\))?\s*\(", re.MULTILINE)
 VERSION_ASSIGN = re.compile(r"""^__version__\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 
 
-CACHE_VERSION = 1
-STATE_SETS = ("dashed", "imports", "local_modules")
+CACHE_VERSION = 3
+STATE_SETS = ("dashed", "spelled", "imports", "local_modules")
 
 
 def cache_dir() -> Path:
@@ -130,6 +134,7 @@ class CodeIndex:
         self.first_file: dict[str, int] = {}     # identifier -> index into self.files
         self.files: list[str] = []
         self.dashed: set[str] = set()            # every --flag / -f literal in code
+        self.spelled: set[str] = set()           # every short whole-word string literal ("silent")
         self.defs: dict[str, list] = {}          # name -> [(path, line, kind)]
         self.imports: set[str] = set()           # top-level external modules/packages
         self.local_modules: set[str] = set()     # importable names defined by the repo
@@ -165,6 +170,7 @@ class CodeIndex:
                     first[tok] = idx
             if "-" in text:
                 self.dashed.update(DASHED.findall(text))
+            self.spelled.update(SPELLED.findall(text))
             low = rel.lower()
             name = low.rsplit("/", 1)[-1]
             if low.endswith((".py", ".pyi", ".pyw")):
@@ -185,7 +191,10 @@ class CodeIndex:
             elif name == "pyproject.toml":
                 self._pyproject(rel, text)
             elif name in ("makefile", "gnumakefile") or name.endswith(".mk"):
-                self.make[rel] = {m.group(1) for m in MAKE_TARGET.finditer(text) if not m.group(1).startswith(".")}
+                targets = {m.group(1) for m in MAKE_TARGET.finditer(text) if not m.group(1).startswith(".")}
+                if MAKE_OPEN.search(text):
+                    targets.add("%")
+                self.make[rel] = targets
             elif name == "justfile":
                 self.make[rel] = {m.group(1) for m in JUST_RECIPE.finditer(text)}
             elif name.startswith("requirements") and name.endswith((".txt", ".in")):

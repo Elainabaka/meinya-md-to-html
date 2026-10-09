@@ -13,7 +13,7 @@ from .checks import Checker
 from .claims import Extractor
 from .codeindex import CodeIndex
 from .decisions import ADR_FILE, LOG_NAME, Decisions
-from .doctype import classify
+from .doctype import classify, old_versions
 from .files import Inventory, git_trouble
 from .gitinfo import Git
 from .mdscan import scan
@@ -115,7 +115,8 @@ def run(root, *, lang: str | None = None, use_git: bool = True, nested: bool | N
     dec = Decisions()
     dec.load(docs)
 
-    kinds = {p: classify(p, cfg, d.kind_mark) for p, d in docs.items()}
+    older = old_versions(inv.docs)
+    kinds = {p: classify(p, cfg, d.kind_mark, p in older) for p, d in docs.items()}
     t = time.perf_counter()
     ext = Extractor(dec.regex, dec.logs, root_abs=str(root))
     claims = []

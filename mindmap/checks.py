@@ -14,6 +14,7 @@ decision-id checks, plan docs get everything at info level.
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import os
 import posixpath
 import re
@@ -57,6 +58,21 @@ PAST_CONTEXT = re.compile(
     r"|(?<!\w)(?:hồi đó|hồi trước|lúc đó|khi đó|ngày trước|lúc trước|thời điểm đó|"
     r"(?:đo|tính đến)(?: ngày)? \d{1,2}/\d{1,2})(?!\w)"
     r"|(?<!\w)từng(?!\w)(?!\s+(?:" + EACH_NOUNS + r")(?!\w))", re.I)     # "từng lọt" = once; "từng câu" = each
+TRANSLATED_NAME = re.compile(r"[-_.]([a-z]{2})(?:[-_][A-Za-z0-9]{2,4})?\.(?:md|mdx|markdown)$", re.I)   # README-ja.md
+# a place in the reader's project: "can be stored at `docs/.vitepress/config.ts`", "in our case, `docs/public/x`"
+FOR_READER = re.compile(
+    r"\b(?:(?:can|could|should|must|may|might) (?:also )?be (?:stored|placed|put|kept|created|added|saved|located)"
+    r"|(?:you|we) (?:can|could|should|may|might|must|need to|have to|will) (?:also )?"
+    r"(?:create|add|place|put|store|save|keep|write)|in our case|in your (?:project|repo|repository|app))\b", re.I)
+# a page about a feature that is gone: said in its opening, before the first section
+RETIRED_PAGE = re.compile(
+    r"\b(?:has|have) been (?:removed|deprecated|discontinued|dropped)\b|\bwas (?:removed|discontinued|dropped)\b"
+    r"|\bno longer (?:supported|maintained|available)\b|\b(?:removed|deprecated|discontinued) (?:experimental )?feature\b"
+    r"|(?<!\w)(?:đã bị (?:gỡ|xóa|xoá|bỏ)|không còn được (?:hỗ trợ|duy trì))(?!\w)", re.I)
+# a name a code block of the doc declares: `const isActive =`, `def handler(`, `func (s *S) Serve(`
+EXAMPLE_DECL = re.compile(
+    r"\b(?:const|let|var|val|def|class|function|fn|struct|enum|interface|trait)\s+\*?\s*([A-Za-z_$][\w$]*)"
+    r"|\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)")
 PATHISH = re.compile(r"[^\s`'\"()\[\]<>|,;]*/[^\s`'\"()\[\]<>|,;]*")
 LANG_CODES = set("ar bg bn ca cs da de el en es et fa fi fr he hi hr hu hy id it ja ka kk ko lt lv mk ml mn "
                  "mr ms my nb ne nl no pa pl pt ro ru si sk sl sq sr sv sw ta te th tl tr uk ur uz vi zh".split())
@@ -137,6 +153,8 @@ class Checker:
         self._skeletons: dict[str, set] = {}
         self._spell: dict | None = None     # case-folded path -> the spelling the repo uses
         self._listings: dict[str, list] = {}
+        self._examples: dict[str, set] = {}
+        self._retired: dict[str, bool] = {}
 
     # -- helpers -------------------------------------------------------------
     def git_for(self, rel: str) -> Git | None:
@@ -152,8 +170,9 @@ class Checker:
         col = col if c is None else c.col
         if sev != INFO and rule not in STRUCTURAL and (self.kind(path) == "plan" or self._done_line(path, line)):
             sev = INFO          # plans describe intent; finished items describe the past
-        if sev != INFO and c is not None and rule in PAST_RULES and self._past(c):
-            sev = INFO
+        if sev != INFO and c is not None and rule in PAST_RULES and (self._past(c) or self._retired_page(c.doc)
+                                                                   or is_post(c.doc) or self._translated(c.doc)):
+            sev = INFO      # a dated post tells of its day; a translation follows its source page, which is warned
         claim_text = c.text if c else kw.get("claim", "")
         kw.setdefault("claim", claim_text)
         msg = message(rule, self.lang, **kw)
@@ -405,8 +424,12 @@ class Checker:
 
     @staticmethod
     def _page_names(p: str) -> list:
-        return [p + e for e in SITE_PAGE_EXT] + [f"{p}/{n}{e}" for n in ("index", "README", "_index")
-                                                 for e in SITE_PAGE_EXT]
+        out = [p + e for e in SITE_PAGE_EXT] + [f"{p}/{n}{e}" for n in ("index", "README", "_index")
+                                                for e in SITE_PAGE_EXT]
+        d, name = posixpath.split(p)
+        if name.lower() == "index":         # `guide/index.html` is built from `guide/README.md` (mdBook, GitBook)
+            out += [posixpath.join(d, n + e) for n in ("README", "_index") for e in SITE_PAGE_EXT]
+        return out
 
     def _tree(self, doc: str) -> str:
         """The top folder a doc sits in, inside its own repo: one docs site lives in one such folder."""
@@ -575,6 +598,16 @@ class Checker:
                     if area and not p.startswith(area + "/"):
                         continue
                     tails.append(p)
+            if "/" in t:
+                # `docs/guide.md` in a page under `website/src/next/docs/` is read from that `docs` folder:
+                # the `website/src/latest/docs/guide.md` of another version is not what it names
+                first = t.split("/", 1)[0]
+                d = posixpath.dirname(c.doc).casefold()
+                while d:
+                    if posixpath.basename(d) == first:
+                        tails = [p for p in tails if p.casefold().startswith(d + "/")]
+                        break
+                    d = posixpath.dirname(d)
             # found by its ending only: weak proof (see _pick), and none at all for a common name
             if name not in COMMON_NAMES:
                 c.extra["tails"] = set(tails[:20])
@@ -593,6 +626,9 @@ class Checker:
         return live[0] if len(live) == 1 else None
 
     def _missing_path(self, c: Claim, git: Git | None, hist, ever: list) -> None:
+        if c.kind != "link" and FOR_READER.search(self.sentence(c)):
+            c.status = "unverified"
+            return
         if not ever:
             self._never(c)
             return
@@ -996,9 +1032,56 @@ class Checker:
             if self.acknowledged(c):
                 c.status = "acknowledged"
                 continue
+            if all(p in self._example_names(c.doc) for p in missing):
+                c.status = "external"       # `isActive` of the page's own example (`const isActive = ref(true)`)
+                continue
             c.extra["missing"] = missing
             pending.append(c)
         self._time_travel_names(pending, "symbol")
+
+    def _example_names(self, doc: str) -> set:
+        """Names the doc's own code blocks declare: the example's, not the repo's."""
+        names = self._examples.get(doc)
+        if names is None:
+            d = self.docs.get(doc)
+            names = set()
+            for f in (d.fences if d is not None else ()):
+                for _, text in f.lines:
+                    names.update(m.group(1) or m.group(2) for m in EXAMPLE_DECL.finditer(text))
+            self._examples[doc] = names
+        return names
+
+    def _translated(self, doc: str) -> bool:
+        """A translation (`docs/ko/guide/x.md` next to `docs/en/`, `README-ja.md`): its drift is the source page's,
+        found and warned there; translators catch up after."""
+        m = TRANSLATED_NAME.search(posixpath.basename(doc))
+        if m and m.group(1).lower() in LANG_CODES and m.group(1).lower() != "en":
+            return True
+        segs = doc.split("/")[:-1]
+        for i, seg in enumerate(segs):
+            if self._is_lang(seg) and seg[:2].lower() != "en":
+                parent = "/".join(segs[:i])
+                pre = parent + "/" if parent else ""
+                langs = {d for d in self.inv.dir_set if d.startswith(pre) and "/" not in d[len(pre):]
+                         and self._is_lang(d[len(pre):])}
+                if len(langs) >= 2:
+                    return True
+        return False
+
+    def _retired_page(self, doc: str) -> bool:
+        """The page opens by saying its subject was removed or deprecated ("has been removed in 3.4"):
+        what it names from the old code is its record of the feature."""
+        hit = self._retired.get(doc)
+        if hit is None:
+            d = self.docs.get(doc)
+            lead = []
+            for n in range(1, min(len(d.lines), 25) + 1) if d is not None else ():
+                text = d.line_text(n)
+                if n > 1 and re.match(r"^\s{0,3}#{2,6}\s", text):
+                    break
+                lead.append(text)
+            hit = self._retired[doc] = bool(RETIRED_PAGE.search(" ".join(lead)))
+        return hit
 
     def _repo_module(self, mod: str) -> bool:
         rel = mod.replace(".", "/")
@@ -1007,7 +1090,11 @@ class Checker:
     def _global_flags(self, claims: list) -> None:
         pending = []
         for c in claims:
-            if c.target in self.index.dashed:
+            name = c.target[2:] if c.target.startswith("--") else ""
+            # a flag library builds `--name` from a plain "name" (Go's pflag, clap, getopt_long) or from a
+            # field `dry_run` (clap derive, typer): the flag is there though no `--name` is written
+            if c.target in self.index.dashed or name in self.index.spelled \
+                    or ("-" in name and self.index.has(name.replace("-", "_"))):
                 c.status = "ok"
                 continue
             if self.acknowledged(c):
@@ -1062,7 +1149,10 @@ class Checker:
                     ev += self._removed_by(git, rev, where[0], gone[0])
                 sug = self._rename_hint(gone[0], where[0], flag=what == "flag")
                 if what == "flag":
-                    self.add("flag-removed", WARNING, c, flag=c.target, script=where[0], when=day(epoch) or "HEAD",
+                    # the whole script left the repo (an installer moved to its own repo, completions
+                    # rebuilt another way): a bare `--flag` may well mean the program that lives on elsewhere
+                    sev = WARNING if where[0] in self.inv.file_set else INFO
+                    self.add("flag-removed", sev, c, flag=c.target, script=where[0], when=day(epoch) or "HEAD",
                              evidence=ev, suggestion=sug)
                 elif now_line:
                     self.add("symbol-removed-now", INFO if used else WARNING, c, evidence=ev, suggestion=sug)
@@ -1143,7 +1233,10 @@ class Checker:
                 if not mk or mk not in self.index.make:
                     c.status = "external"
                     continue
-                if c.target in self.index.make[mk]:
+                targets = self.index.make[mk]
+                # `%:` and `test-%:` are pattern rules: `make test-full` runs `test-%`
+                if c.target in targets or any("%" in t and fnmatch.fnmatchcase(c.target, t.replace("%", "*"))
+                                              for t in targets):
                     c.status, c.where = "ok", mk
                     continue
                 if self.acknowledged(c):
@@ -1261,6 +1354,8 @@ class Checker:
             for t, p, n, nums in timed[1:]:
                 if nums == newest[3] or t >= newest[0] or p == newest[1]:
                     continue
+                if NUMBER.sub("#", p) == NUMBER.sub("#", newest[1]):
+                    continue        # `migrate-v1-to-v2.md` and `migrate-v2-to-v3.md`: two versions, not two copies
                 diff_mine = [a for a, b in zip(nums, newest[3]) if a != b]
                 diff_theirs = [b for a, b in zip(nums, newest[3]) if a != b]
                 self.add("copies-diverged", WARNING, None, path=p, line=n,
