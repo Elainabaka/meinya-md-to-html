@@ -202,7 +202,7 @@ For code scanning, `mindmap check . --format sarif --out mindmap.sarif`. Other f
 | Show more, or fail earlier | `--severity info` shows notes; `--fail-on warning` makes warnings fail the run |
 | Skip a folder | `--exclude "vendor/**"`, or `exclude = ["vendor/**"]` in `.mindmap.toml` |
 | Silence one line, a block or a file | `<!-- mindmap: ignore -->` at the end of the line, `ignore-start` and `ignore-end` around a block, `ignore-file` anywhere in the doc |
-| Tell it how to read a doc | `live`, `plans`, `history` lists of globs in `.mindmap.toml` (or under `[tool.mindmap]` in `pyproject.toml`) |
+| Tell it how to read a doc | `live`, `plans`, `history` lists of globs in `.mindmap.toml` (or under `[tool.mindmap]` in `pyproject.toml`), or `<!-- mindmap: history -->` (or `plan`, `live`) anywhere in the doc, which wins over both. A history doc (an old prompt, a pasted chat) keeps only its decision ids checked |
 | Messages in Vietnamese | `--lang vi`, or `lang = "vi"` in the config |
 
 ## Measured, not promised
@@ -246,7 +246,7 @@ A second experiment: rename one class in starlette (`CORSMiddleware` to `CorsMid
 - Names in code are found with a text index and patterns for definitions in more than thirty languages, not with a parser for each. A definition written in an unusual way is missed, and then Mind Map stays quiet.
 - A shallow clone has less history, so it gives fewer findings (never more). In CI, fetch the full history.
 - If git does not answer in time (each call has a hard time limit, and after three timeouts in one run it stops asking), the report says how many questions went unanswered: a `!` line, `stats.git_unanswered` in JSON, a line on stderr. Such a report may miss findings: run it again. The exit code still follows the findings only.
-- Status: 0.1.0, alpha. It needs Python 3.11 or newer and git. Tested on Windows (Python 3.11, 3.12, 3.13) and Linux (Python 3.14): 141 tests, 84 of them for Mind Map. Not tested yet: macOS.
+- Status: 0.1.0, alpha. It needs Python 3.11 or newer and git. Tested on Windows (Python 3.11, 3.12, 3.13) and Linux (Python 3.14): 146 tests, 89 of them for Mind Map (on Linux the 24 tests of the desktop app were skipped: no pywebview there). Not tested yet: macOS.
 
 ## Safety
 

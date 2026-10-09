@@ -155,7 +155,7 @@ Cho code scanning: `mindmap check . --format sarif --out mindmap.sarif`. Các đ
 | Xem nhiều hơn, hoặc cho trượt sớm hơn | `--severity info` hiện cả ghi chú; `--fail-on warning` cho cảnh báo làm lượt chạy trượt |
 | Bỏ qua một thư mục | `--exclude "vendor/**"`, hoặc `exclude = ["vendor/**"]` trong `.mindmap.toml` |
 | Tắt cho một dòng, một đoạn, cả file | `<!-- mindmap: ignore -->` ở cuối dòng; `ignore-start` và `ignore-end` quanh một đoạn; `ignore-file` ở bất kỳ đâu trong tài liệu |
-| Nói cho nó biết đọc một tài liệu theo kiểu nào | danh sách glob `live`, `plans`, `history` trong `.mindmap.toml` (hoặc dưới `[tool.mindmap]` của `pyproject.toml`) |
+| Nói cho nó biết đọc một tài liệu theo kiểu nào | danh sách glob `live`, `plans`, `history` trong `.mindmap.toml` (hoặc dưới `[tool.mindmap]` của `pyproject.toml`), hoặc `<!-- mindmap: history -->` (hay `plan`, `live`) ở bất kỳ đâu trong tài liệu, thắng cả hai cách trên. Tài liệu lịch sử (prompt cũ, đoạn chat dán lại) chỉ còn được soát mã quyết định |
 | Thông báo tiếng Việt | `--lang vi`, hoặc `lang = "vi"` trong cấu hình |
 
 ## Đo thật, không hứa suông
@@ -199,7 +199,7 @@ Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddlew
 - Tên trong code được tìm bằng chỉ mục chữ và mẫu nhận định nghĩa cho hơn ba mươi ngôn ngữ, không phải bằng bộ phân tích riêng cho từng ngôn ngữ. Định nghĩa viết kiểu lạ sẽ bị sót, và khi đó Mind Map im lặng.
 - Bản clone nông có ít lịch sử nên ra ít phát hiện hơn (không bao giờ nhiều hơn). Trong CI hãy lấy đủ lịch sử.
 - Nếu git không trả lời kịp (mỗi lần gọi có giới hạn thời gian thật, hết giờ ba lần trong một lượt thì thôi không hỏi nữa), báo cáo ghi rõ bao nhiêu câu hỏi không được trả lời: một dòng `!`, `stats.git_unanswered` trong JSON, một dòng ở stderr. Báo cáo như vậy có thể thiếu phát hiện: hãy chạy lại. Mã thoát vẫn chỉ theo phát hiện.
-- Trạng thái: 0.1.0, bản alpha. Cần Python 3.11 trở lên và git. Đã thử trên Windows (Python 3.11, 3.12, 3.13) và Linux (Python 3.14): 141 test, trong đó 84 của Mind Map. Chưa thử: macOS.
+- Trạng thái: 0.1.0, bản alpha. Cần Python 3.11 trở lên và git. Đã thử trên Windows (Python 3.11, 3.12, 3.13) và Linux (Python 3.14): 146 test, trong đó 89 của Mind Map (trên Linux, 24 test của app máy tính được bỏ qua vì không có pywebview). Chưa thử: macOS.
 
 ## An toàn
 
