@@ -1283,8 +1283,10 @@ class Checker:
                 for _, k in bad:
                     counts[k] += 1
                 cells = max(counts, key=counts.get)
+                order = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))     # 45 rows of 3, then 3 of 4
+                detail = ", ".join((f"{n} dòng {k} ô" if self.lang == "vi" else f"{n} with {k}") for k, n in order)
                 self.add("table-shape", INFO, None, path=path, line=bad[0][0], claim=f"{len(bad)} rows",
-                         bad=len(bad), rows=len(t.rows), cells=cells, header=t.header_cells)
+                         bad=len(bad), rows=len(t.rows), cells=cells, header=t.header_cells, detail=detail)
             runs: list = []
             for n in d.orphan_rows:
                 if n in d.ignored:

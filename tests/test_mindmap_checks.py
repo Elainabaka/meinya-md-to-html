@@ -225,6 +225,13 @@ def test_history_docs_only_check_decisions(repo):
     assert run(repo).findings == []
 
 
+def test_table_shape_counts_each_kind_of_short_row(repo):
+    rows = "".join(f"| {i} | x |\n" for i in range(3)) + "| 9 | y | z |\n"
+    repo.write("NOTES.md", "# Notes\n\n| A | B | C | D |\n|---|---|---|---|\n" + rows).commit()
+    [f] = only(run(repo), "table-shape")
+    assert f.message.endswith("(4): 3 with 2, 1 with 3")
+
+
 def test_a_doc_marked_history_only_checks_decisions(repo):
     old = "# Prompt I sent\n\nRun `src/old_name.py`, see [notes](notes.md).\n"
     repo.write("src/old_name.py", "x = 1\n")

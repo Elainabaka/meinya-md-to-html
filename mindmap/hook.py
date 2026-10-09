@@ -7,7 +7,12 @@
   (CLAUDE.md, AGENTS.md...).
 
 The text goes back to the agent as `additionalContext`. The hook never blocks
-an edit and never fails loudly: any problem means exit 0 and no output.
+an edit (exit 0 always), but it is never silent about itself: if it cannot
+check, it says so in one line, so no message really means "nothing found".
+Input that is not a hook event gets no output.
+
+The project root is `--root`, else `CLAUDE_PROJECT_DIR` (Claude Code sets it
+for hooks), else the session's cwd, which moves when the agent runs `cd`.
 
 .claude/settings.json (the user installs it; this tool never does). A hook
 runs inside whatever project is open, so call the installed `mindmap` command
@@ -122,6 +127,17 @@ def session_start(root: Path) -> str:
     return "\n".join([head, *_finding_lines(bad)])
 
 
+def _failed(base: Path | None, err: Exception) -> str:
+    try:
+        lang = _lang(base) if base else "en"
+    except Exception:
+        lang = "en"
+    what = f"{type(err).__name__}: {err}"[:160]
+    return (f"Mind Map could not check this ({what}); no report here does not mean the docs are clean."
+            if lang != "vi" else
+            f"Mind Map không soát được lần này ({what}); không có báo cáo không có nghĩa là tài liệu sạch.")
+
+
 def main(event: str = "auto", root: str | None = None) -> int:
     try:
         raw = sys.stdin.buffer.read()
@@ -130,11 +146,15 @@ def main(event: str = "auto", root: str | None = None) -> int:
             return 0
     except Exception:
         return 0
+    ev, base = "post-tool", None
     try:
         name = data.get("hook_event_name") or ""
         ev = event if event != "auto" else ("session-start" if name == "SessionStart" else "post-tool")
-        base = Path(root or data.get("cwd") or os.getcwd()).resolve()
+        base = Path(root or os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd()).resolve()
         text = session_start(base) if ev == "session-start" else post_tool(base, data)
+    except Exception as e:
+        text = _failed(base, e)
+    try:
         if text:
             out = {"hookSpecificOutput": {
                 "hookEventName": "SessionStart" if ev == "session-start" else "PostToolUse",

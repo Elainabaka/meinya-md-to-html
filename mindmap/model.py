@@ -149,8 +149,8 @@ MESSAGES = {
         "không đọc được luật mindmap này: {error}",
     ),
     "table-shape": (
-        "{bad} of {rows} table rows have {cells} cells instead of {header}",
-        "{bad}/{rows} dòng của bảng có {cells} ô thay vì {header}",
+        "{bad} of {rows} table rows have a different number of cells than the header ({header}): {detail}",
+        "{bad}/{rows} dòng của bảng có số ô khác dòng tiêu đề ({header} ô): {detail}",
     ),
     "stale-risk": (
         "code this doc describes changed after the doc: {files}",

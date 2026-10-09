@@ -120,6 +120,7 @@ def test_hook_session_start_and_quiet_cases(repo):
 
 def test_hook_main_never_fails(repo, monkeypatch, capsys):
     from mindmap import hook
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     for raw in (b"not json", b"[1, 2]", b""):
         monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(raw)))
         assert hook.main("auto", str(repo.root)) == 0
@@ -132,6 +133,37 @@ def test_hook_main_never_fails(repo, monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
     assert "AGENTS.md:3" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def _hook_out(hook, monkeypatch, capsys, payload) -> str:
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(payload).encode())))
+    capsys.readouterr()
+    assert hook.main("auto", None) == 0
+    out = capsys.readouterr().out
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+
+
+def test_hook_root_is_the_project_dir_not_the_folder_the_agent_cd_into(repo, monkeypatch, capsys):
+    from mindmap import hook
+    repo.write("AGENTS.md", "# Agents\n\nSee [missing](docs/missing.md).\n")
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "cwd": str(repo.root / "src"),
+               "tool_input": {"file_path": str(repo.root / "AGENTS.md")}}
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    assert _hook_out(hook, monkeypatch, capsys, payload) == ""           # the doc is outside `src/`
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(repo.root))
+    assert "AGENTS.md:3" in _hook_out(hook, monkeypatch, capsys, payload)
+
+
+def test_hook_says_so_when_it_cannot_check(repo, monkeypatch, capsys):
+    from mindmap import hook
+
+    def broken(root, data):
+        raise RuntimeError("git is gone")
+    monkeypatch.setattr(hook, "post_tool", broken)
+    payload = {"hook_event_name": "PostToolUse", "tool_name": "Edit", "cwd": str(repo.root),
+               "tool_input": {"file_path": "AGENTS.md"}}
+    text = _hook_out(hook, monkeypatch, capsys, payload)
+    assert "could not check" in text and "git is gone" in text
 
 
 # -- impact, cost, context -------------------------------------------------------------
@@ -180,6 +212,14 @@ def test_context_marks_stale_lines(repo):
     repo.write("src/app.py", "def keep():\n    return 2\n").commit("drop")
     pack = build(repo.root, "agents build_index", budget=400)
     assert "[stale]" in pack["text"]
+
+
+def test_context_shows_a_section_that_two_copies_share_once(repo):
+    from mindmap.context import build
+    repo.write("public/guide.md", "# Guide\n\n## Setup\n\nInstall the tool, then index the files.\n").commit("copy")
+    pack = build(repo.root, "install setup", budget=400)
+    setups = [s for s in pack["sections"] if s["title"] == "Setup"]
+    assert len(setups) == 1 and pack["text"].count("Install the tool") == 1
 
 
 def test_mcp_context_puts_the_text_in_the_structured_result(repo):

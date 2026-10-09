@@ -78,14 +78,20 @@ def build(root, query: str, budget: int = 2000) -> dict:
             scored.append((s * WEIGHT[kinds[it[0]]], it))
     scored.sort(key=lambda x: -x[0])
     chosen, used = [], 0
+    seen = set()                            # the same section in two copies of a doc is shown once
     for s, it in scored:
+        key = " ".join(it[6].split())
+        if key in seen:
+            continue
         t = estimate_tokens(it[6])
         if used + t > budget:
             if not chosen and t > budget:       # one section larger than the budget: cut it
                 chosen.append((s, it, budget))
+                seen.add(key)
                 used = budget
             continue
         chosen.append((s, it, t))
+        seen.add(key)
         used += t
         if used >= budget * 0.95:
             break
