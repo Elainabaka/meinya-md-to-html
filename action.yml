@@ -1,0 +1,41 @@
+name: "Meinya Mind Map"
+description: "Check what your docs claim about your code, with proof from the working tree and git history."
+author: "Elainabaka"
+branding:
+  icon: "map"
+  color: "purple"
+
+inputs:
+  path:
+    description: "Folder or .md file to check."
+    default: "."
+  severity:
+    description: "Lowest level to report: error, warning or info."
+    default: "warning"
+  fail-on:
+    description: "Level that fails the job: error, warning, info or never."
+    default: "error"
+  args:
+    description: "Extra arguments for `mindmap check`, for example: --exclude vendor/**"
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check docs against code
+      shell: bash
+      env:
+        # inputs go through the environment, never straight into the script text
+        MM_PATH: ${{ inputs.path }}
+        MM_SEVERITY: ${{ inputs.severity }}
+        MM_FAIL_ON: ${{ inputs.fail-on }}
+        MM_ARGS: ${{ inputs.args }}
+        MM_HOME: ${{ github.action_path }}
+      run: |
+        if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+        set -f    # extra args are split into words, but a glob such as vendor/** stays as written
+        # 1) a readable summary on the run page; 2) annotations on the changed lines, and the exit code
+        "$PY" -I -X utf8 "$MM_HOME/run_mindmap.py" check "$MM_PATH" --format md --out "$GITHUB_STEP_SUMMARY" \
+          --severity "$MM_SEVERITY" --fail-on never $MM_ARGS
+        "$PY" -I -X utf8 "$MM_HOME/run_mindmap.py" check "$MM_PATH" --format github \
+          --severity "$MM_SEVERITY" --fail-on "$MM_FAIL_ON" $MM_ARGS

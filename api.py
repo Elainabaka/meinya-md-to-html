@@ -58,7 +58,7 @@ def _tool_version(root: Path) -> str:
     try:
         return json.loads((root / "capability.json").read_text("utf-8"))["version"]
     except Exception:
-        return "2.1.0"
+        return "2.2.0"
 
 
 def _sanitize_settings(settings: dict | None) -> dict:

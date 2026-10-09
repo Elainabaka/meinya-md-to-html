@@ -1,0 +1,8 @@
+- id: mindmap
+  name: Meinya Mind Map (docs vs code)
+  description: Check what the docs claim about the code, with proof from the working tree and git history.
+  entry: mindmap check
+  language: python
+  pass_filenames: false
+  always_run: true
+  require_serial: true

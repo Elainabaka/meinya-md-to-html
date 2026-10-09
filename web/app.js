@@ -186,7 +186,7 @@ async function refresh(opts){
   $("cmBeside").checked = state.cacheMode !== "tool";
   $("cmTool").checked = state.cacheMode === "tool";
   $("optWatch").checked = state.watch;
-  $("ver").textContent = "v" + (st.version || "2.1.0");
+  $("ver").textContent = "v" + (st.version || "2.2.0");
   if(opts.selectLast && state.files.length) state.sel = state.files.length - 1;
   if(state.sel >= state.files.length) state.sel = state.files.length - 1;
   if(state.sel < 0 && state.files.length && !opts.selectLast) state.sel = state.files.length - 1;
@@ -461,7 +461,7 @@ window.addEventListener("pywebviewready", async () => {
   setZoom(1);
   await refresh({ preview: true });
   const st = await call("initial_state").catch(() => null);
-  log("Meinya MD to HTML v" + ((st && st.version) || "2.1.0") + " — cache tự động, không cần Convert.");
+  log("Meinya MD to HTML v" + ((st && st.version) || "2.2.0") + " — cache tự động, không cần Convert.");
   setInterval(poll, 1200);
 });
 })();

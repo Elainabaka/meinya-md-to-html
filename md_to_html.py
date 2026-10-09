@@ -334,7 +334,9 @@ class Parser:
                 sub, pos = self._build_list(raw, pos, ind)
                 parts[-1] = parts[-1][:-5] + sub + "</li>"
                 continue
-            parts.append(f"<li{' class=\"task\"' if chk is not None else ''}>{text}</li>")
+            # tach khoi f-string: Python < 3.12 cam dau \ trong bieu thuc f-string
+            task = ' class="task"' if chk is not None else ""
+            parts.append(f"<li{task}>{text}</li>")
             pos += 1
         return f"<{tag}{cls}>{''.join(parts)}</{tag}>", pos
 
@@ -426,7 +428,7 @@ article h3::before{content:counter(h2)"."counter(h3)" ";color:var(--faint);font-
 .toc a.hide{display:none}
 .toc .n{color:var(--faint);font-variant-numeric:tabular-nums;margin-right:6px}
 .table-wrap{max-height:min(70vh,640px)}
-thead th{position:sticky;top:58px;z-index:2}
+thead th{position:sticky;top:0;z-index:2}
 hr{border:0;border-top:1px solid var(--line);margin:2.5em 0}
 img{max-width:100%;border-radius:8px}
 footer{max-width:1120px;margin:0 auto;padding:0 24px 48px;color:var(--faint);font-size:13px}

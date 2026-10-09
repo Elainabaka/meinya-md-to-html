@@ -1,0 +1,39 @@
+# Packaging for Meinya Mind Map only (the `mindmap` package, standard library only).
+# The MD to HTML desktop app is not packaged: it runs from `run.bat`.
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meinya-mind-map"
+dynamic = ["version"]
+description = "Check what your docs claim about your code, with proof from the working tree and git history."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Elainabaka" }]
+keywords = ["documentation", "markdown", "docs", "drift", "lint", "mcp", "claude-code", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Documentation",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://elainabaka.com"
+Repository = "https://github.com/Elainabaka/meinya-mind-map"
+
+[project.scripts]
+mindmap = "mindmap.cli:main"
+meinya-mind-map = "mindmap.cli:main"
+
+[tool.setuptools]
+packages = ["mindmap"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mindmap.__version__" }
