@@ -22,6 +22,8 @@ import time
 from collections import Counter, defaultdict
 
 from .codeindex import IDENT, CodeIndex, stdlib_names
+from .cost import AGENT_NAMES, AGENT_PATHS
+from .claims import has_placeholder
 from .doctype import is_post
 from .files import GENERATED_DIRS, Inventory, is_private, kind_of
 from .gitinfo import Git, day
@@ -102,6 +104,11 @@ def redact(text: str) -> str:
     return SENSITIVE_VALUE.sub(r"\1***", text)
 
 
+def _agent_doc(path: str) -> bool:
+    """An instruction file a coding agent loads (CLAUDE.md, AGENTS.md... at any depth)."""
+    return posixpath.basename(path).lower() in AGENT_NAMES or path in AGENT_PATHS
+
+
 class PathIndex:
     def __init__(self, inv: Inventory):
         self.by_name: dict[str, list] = defaultdict(list)
@@ -144,6 +151,14 @@ class Checker:
         self.findings: list[Finding] = []
         self.external = stdlib_names() | set(index.imports) | JS_GLOBALS
         self._now = time.time()
+        self._docusaurus_sites = sorted(
+            {posixpath.dirname(path) for path in inv.file_set
+             if posixpath.basename(path) in (
+                 "docusaurus.config.js", "docusaurus.config.ts",
+                 "docusaurus.config.mjs", "docusaurus.config.cjs",
+                 "sidebars.js", "sidebars.ts", "sidebars.json",
+                 "sidebars.cjs", "sidebars.mjs")},
+            key=len, reverse=True)
         self._modified: set | None = None
         self._never_links: dict[str, list] = defaultdict(list)
         self._mirrors: dict | None = None
@@ -155,6 +170,8 @@ class Checker:
         self._listings: dict[str, list] = {}
         self._examples: dict[str, set] = {}
         self._retired: dict[str, bool] = {}
+        self._ignore_rules: dict[str, list] = {}
+        self._path_strings: set[str] | None = None
 
     # -- helpers -------------------------------------------------------------
     def git_for(self, rel: str) -> Git | None:
@@ -268,14 +285,35 @@ class Checker:
         t = c.target
         anchor = c.extra.get("anchor")
         if anchor in ("root", "exact"):
-            return [posixpath.normpath(t)]
+            out = [posixpath.normpath(t)]
+            directory = posixpath.dirname(c.doc)
+            if c.ctx == "tree" and directory and t.startswith(directory + "/"):
+                rooted = posixpath.normpath(posixpath.join(self.inv.repo_of(c.doc), t[len(directory) + 1:]))
+                if rooted not in out:
+                    out.append(rooted)
+            return out
         if c.kind == "link":
             if t.startswith("/"):
                 repo = self.inv.repo_of(c.doc)
                 return [posixpath.normpath(posixpath.join(repo, t.lstrip("/")))]
             p = posixpath.normpath(posixpath.join(posixpath.dirname(c.doc), t))
             m = self._mirror_dir(c.doc)
-            return [p] if m is None else [p, posixpath.normpath(posixpath.join(m, t))]
+            out = [p] if m is None else [p, posixpath.normpath(posixpath.join(m, t))]
+            if t.lower().endswith((".md", ".markdown", ".mdx")):
+                for site in self._docusaurus_sites:
+                    if site and not c.doc.startswith(site + "/"):
+                        continue
+                    relative = c.doc[len(site):].lstrip("/")
+                    match = re.match(
+                        r"(docs|versioned_docs/[^/]+|i18n/[^/]+/docusaurus-plugin-content-docs/[^/]+)/",
+                        relative)
+                    if match:
+                        root = posixpath.join(site, match.group(1))
+                        fallback = posixpath.normpath(posixpath.join(root, t))
+                        if fallback.startswith(root + "/") and fallback not in out:
+                            out.append(fallback)
+                    break
+            return out
         out = []
         for b in self._bases(c):
             p = posixpath.normpath(posixpath.join(b, t)) if b else posixpath.normpath(t)
@@ -476,6 +514,13 @@ class Checker:
     def _paths(self, claims: list) -> None:
         missing: list = []
         for c in claims:
+            if c.kind == "link" and not c.target.startswith("/"):
+                repo = self.inv.repo_of(c.doc)
+                doc = c.doc[len(repo):].lstrip("/") if repo else c.doc
+                target = posixpath.normpath(posixpath.join(posixpath.dirname(doc), c.target))
+                if re.match(r"^(?:\.\./)+(?:issues|pulls|pull|wiki|discussions|releases|actions|security|compare|tags|milestones|projects|commits|blob|tree)(?:/|$)", target):
+                    c.status = "external"
+                    continue
             if c.kind != "link" and self._generated(c):
                 c.status = "skipped"
                 continue
@@ -544,7 +589,26 @@ class Checker:
             return
         have = self._skeletons.get(target)
         if have is None:
-            have = self._skeletons[target] = {skeleton(x) for x in d.anchors}
+            have = set()
+            pending = [d]
+            seen = set()
+            while pending:
+                page = pending.pop()
+                if page.path in seen:
+                    continue
+                seen.add(page.path)
+                have.update(skeleton(value) for value in page.anchors)
+                for imported in page.imports:
+                    if imported.startswith(("../", "/")) or imported in seen:
+                        continue
+                    partial = self.docs.get(imported)
+                    if partial is None and self.load_doc is not None:
+                        partial = self.load_doc(imported)
+                        if partial is not None:
+                            self.docs[imported] = partial
+                    if partial is not None:
+                        pending.append(partial)
+            self._skeletons[target] = have
         want = {skeleton(a), skeleton(re.sub(r"-\d+$", "", a))}
         if want & have:
             return          # every site names headings its own way, and numbers the repeats
@@ -703,7 +767,7 @@ class Checker:
             sev = ERROR if c.kind == "link" else INFO if self._names_target(c, fol) else WARNING
             self.add("link-broken" if c.kind == "link" else "path-gone", sev, c, evidence=ev, suggestion=sug)
             return
-        self._never(c)
+        self._never(c, missing=False)
 
     def _follow_text(self, fol: dict | None, ev: list, path: str) -> str:
         if not fol:
@@ -720,7 +784,7 @@ class Checker:
         return (f"renamed to `{to}` in {fol['sha']} ({fol['date']}), later removed too" if self.lang != "vi"
                 else f"đã đổi thành `{to}` ở commit {fol['sha']} ({fol['date']}), sau đó cũng bị xóa")
 
-    def _never(self, c: Claim) -> None:
+    def _never(self, c: Claim, *, missing: bool = True) -> None:
         """Never in the repo: report links, typos and clear commands; the rest is unverified."""
         if c.kind == "link":
             self._never_links[c.doc].append(c)
@@ -737,7 +801,99 @@ class Checker:
                 if parent and not parent.startswith("..") and parent in self.inv.dir_set:
                     self.add("command-missing", WARNING, c)
                     return
+        if missing and c.kind == "path" and self._path_missing(c):
+            # Measured on 14 small repos built with agents: 1 of 21 was real elsewhere (other repos,
+            # examples, branch names); an agent's own instruction file is where a made-up path does harm.
+            self.add("path-missing", WARNING if _agent_doc(c.doc) else INFO, c)
+            return
         c.status = "unverified"
+
+    def _ignored_path(self, path: str, want_dir: bool = False) -> bool:
+        parts = path.split("/")
+        rules = []
+        for depth in range(len(parts)):
+            directory = "/".join(parts[:depth])
+            if directory not in self._ignore_rules:
+                ignore = posixpath.join(directory, ".gitignore")
+                text = self.inv.text(ignore) if not is_private(ignore) else None
+                self._ignore_rules[directory] = [line.rstrip() for line in (text or "").splitlines()
+                                                 if line.strip() and not line.startswith("#")]
+            rules.extend((directory, rule) for rule in self._ignore_rules[directory])
+            candidate = "/".join(parts[:depth + 1])
+            ignored = False
+            for base, rule in rules:
+                negate = rule.startswith("!")
+                pattern = rule[1:] if negate else rule
+                relative = candidate[len(base) + 1:] if base else candidate
+                if pattern.endswith("/") and depth == len(parts) - 1 and not want_dir:
+                    continue
+                if pattern and match_any(relative, [pattern]):
+                    ignored = not negate
+            if ignored:
+                return True
+        return False
+
+    def _path_missing(self, c: Claim) -> bool:
+        target = c.target.replace("\\", "/")
+        directory = posixpath.dirname(c.doc)
+        tree_base = directory if c.ctx == "tree" and directory and target.startswith(directory + "/") else ""
+        referenced = target[len(tree_base) + 1:] if tree_base else target
+        parts = referenced.strip("/").split("/")
+        if (self.kind(c.doc) != "live" or len(parts) < 2 or target.startswith(("/", "~"))
+                or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", target)
+                or has_placeholder(target) or "[" in target or is_private(target)
+                or any(part.lower().startswith(("your-", "my-")) for part in parts)
+                or any(part.lower() in GENERATED_DIRS | {"build", "out", "target", ".git"} for part in parts)
+                or self._past(c) or self._retired_page(c.doc)):
+            return False
+        sentence = self.sentence(c)
+        before = sentence.split(c.text, 1)[0] if c.text in sentence else sentence
+        if re.search(r"\b(?:for example|example|usually|typically)\b|\be\.g\.", before, re.I):
+            return False
+        if re.search(r"\b(?:you|we)\s+(?:can|could|should|may|might|must|need to|have to|will)\s+(?:also\s+)?(?:customize|configure|define|implement|set up)\b", before, re.I):
+            return False
+        after = sentence.split(c.text, 1)[1] if c.text in sentence else ""
+        if (re.search(r"\b(?:no (?:such )?(?:file|folder|directory|path)|không (?:có|tồn tại)|tidak (?:ada|memiliki))\b[^.!?;\n]{0,60}$", before, re.I)
+                or re.match(r'''^[\s`"']*(?:does not|doesn't|do not|don't|is not|isn't) exist\b''', after, re.I)):
+            return False
+        if re.search(r"\b(?:denyWrite|denyRead|allowWrite|allowRead|denylist|allowlist|denied individually|deny list|allow list)\b", sentence, re.I):
+            return False
+        if re.search(r"\bif\s+(?:the\s+)?(?:repo(?:sitory)?|project|app|you)\b[^\n]*\b(?:has|have|uses?|contains?|includes?)\b", before, re.I):
+            return False
+        doc = self.docs.get(c.doc)
+        if doc is not None:
+            from urllib.parse import unquote, urlsplit
+            context = " ".join(doc.line_text(line) for line in range(max(1, c.line - 12), c.line + 1))
+            for url in re.findall(r'''https?://[^\s<>()[\]"'`]+''', context, re.I):
+                try:
+                    remote = unquote(urlsplit(url.rstrip(".,;")).path)
+                except ValueError:
+                    continue
+                if remote.endswith("/" + target.lstrip("./")):
+                    return False
+        if re.search(r"\b(?:create|add|new|generate|will|should\s+create|tạo|thêm|sinh\s+ra|sẽ)\b[^.!?;\n]{0,60}$", before, re.I):
+            return False
+        if re.search(r"\b(?:build|compil\w*|generat\w*|render\w*)\b[^\n]*\b(?:moves?|copies?|writes?|outputs?|emits?)\b[^\n]*\bto\s*`?\s*$", before, re.I):
+            return False
+        candidates = self._cands(c)
+        if any(self._ignored_path(path, bool(c.extra.get("dir") or target.endswith("/")))
+               for path in candidates if not path.startswith("..")):
+            return False
+        first = next((part for part in parts if part not in (".", "..")), "")
+        if not first:
+            return False
+        first_path = posixpath.join(tree_base, first) if tree_base else first
+        probe = Claim("path", first, first_path, c.doc, c.line, c.col, c.ctx, c.extra.copy())
+        if not any(not path.startswith("..") and self._exists(path, True) for path in self._cands(probe)):
+            return False
+        if self._path_strings is None:
+            self._path_strings = set()
+            for source in self.index.files:
+                text = self.inv.text(source) or ""
+                for match in re.finditer(r'''(["'`])((?:\\.|(?!\1)[^\\\r\n])*)\1''', text):
+                    literal = match.group(2).replace("\\", "/")
+                    self._path_strings.add(posixpath.normpath(literal))
+        return not ({posixpath.normpath(target), posixpath.basename(target)} & self._path_strings)
 
     def _near(self, c: Claim) -> str | None:
         """A sibling whose name differs by a typo (not a variant like `x_v2` next to `x`)."""
@@ -1247,6 +1403,10 @@ class Checker:
     def _decisions(self, claims: list) -> None:
         dec = self.decisions
         for c in claims:
+            if any(part.lower() in {"template", "templates", "scaffold", "boilerplate"}
+                   for part in c.doc.split("/")[:-1]):
+                c.status = "skipped"
+                continue
             item = dec.lookup(c.target, c.doc)
             if item is None:
                 if dec.known_prefix(c.target, c.doc):

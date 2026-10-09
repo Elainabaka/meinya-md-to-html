@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -13,7 +14,7 @@ from typing import Any
 import webview
 
 from mdhtml import cache
-from mdhtml.bridge import preview_stats, render_text, run_convert, suggest_output
+from mdhtml.bridge import preview_stats, preview_stats_of_text, render_text, run_convert, suggest_output
 
 STATE_NAME = ".md_to_html_state.json"
 INBOX_NAME = ".drop_inbox"
@@ -42,8 +43,8 @@ def _reveal_path(path: str):
         _open_path(str(Path(path).parent))
 
 
-def _file_brief(path: Path) -> dict:
-    return {"name": path.name, "path": str(path), "stats": preview_stats(str(path))}
+def _file_brief(path: Path, lang: str = "vi") -> dict:
+    return {"name": path.name, "path": str(path), "stats": preview_stats(str(path), lang)}
 
 
 def _norm_key(path) -> str:
@@ -72,6 +73,142 @@ def _sanitize_settings(settings: dict | None) -> dict:
     }
 
 
+MM_TIER_RANK = {"error": 0, "warning": 1, "info": 2, "clean": 3}
+
+UI_LANGS = ("vi", "en")
+DEFAULT_UI_LANG = "vi"  # khi chua biet ngon ngu (goi tay, test) thi dung tieng Viet nhu truoc
+
+# Chuoi backend tra ve cho giao dien. "vi" giu nguyen tu ban cu.
+UI_TEXT = {
+    "vi": {
+        "bad_lang": "Ngôn ngữ không được hỗ trợ.",
+        "no_file": "Chưa chọn file.",
+        "no_preview": "Chưa có file để xem.",
+        "no_preview_alt": "Chưa có file để preview.",
+        "read_failed": "Không đọc được file: {exc}",
+        "render_error": "Lỗi render.",
+        "missing_file": "File đã bị xoá hoặc đổi tên.",
+        "no_output_dir": "Chưa có thư mục output để mở.",
+        "save_dialog_failed": "Không mở được hộp thoại lưu.",
+        "not_rendered": "Chưa render được.",
+        "batch_running": "Đang có một batch chạy.",
+        "no_input": "Chưa có file đầu vào.",
+        "job_prepare": "Chuẩn bị…",
+        "job_done": "Hoàn tất",
+        "folder_gone": "Thư mục này không còn tồn tại.",
+        "nothing_to_check": "Chưa có file .md hay thư mục nào để soát: thêm file trước, hoặc bấm Đổi thư mục.",
+        "check_running": "Đang soát rồi, chờ xong đã.",
+        "no_results": "Chưa có kết quả soát.",
+        "doc_not_in_results": "Tài liệu này không có trong kết quả soát.",
+        "file_gone": "Không tìm thấy file này nữa.",
+        "queue_add_failed": "Không thêm được file vào hàng đợi.",
+        "check_error": "Không soát được thư mục này: {detail}",
+    },
+    "en": {
+        "bad_lang": "Unsupported language.",
+        "no_file": "No file selected.",
+        "no_preview": "No file to preview yet.",
+        "no_preview_alt": "No file to preview yet.",
+        "read_failed": "Could not read the file: {exc}",
+        "render_error": "Render error.",
+        "missing_file": "File deleted or renamed.",
+        "no_output_dir": "No output folder to open yet.",
+        "save_dialog_failed": "Could not open the save dialog.",
+        "not_rendered": "Could not render yet.",
+        "batch_running": "A batch is already running.",
+        "no_input": "No input files yet.",
+        "job_prepare": "Preparing…",
+        "job_done": "Done",
+        "folder_gone": "This folder no longer exists.",
+        "nothing_to_check": "No .md file or folder to check yet: add a file first, or click Change folder.",
+        "check_running": "A check is already running. Wait for it to finish.",
+        "no_results": "No check results yet.",
+        "doc_not_in_results": "This document is not in the check results.",
+        "file_gone": "This file can no longer be found.",
+        "queue_add_failed": "Could not add the file to the queue.",
+        "check_error": "Could not check this folder: {detail}",
+    },
+}
+
+
+def _norm_lang(lang) -> str:
+    s = str(lang or "").strip().lower()
+    return s if s in UI_LANGS else ""
+
+
+def ui_text(key: str, lang: str = DEFAULT_UI_LANG, **kw) -> str:
+    table = UI_TEXT.get(lang) or UI_TEXT[DEFAULT_UI_LANG]
+    text = table.get(key) or UI_TEXT[DEFAULT_UI_LANG].get(key) or key
+    return text.format(**kw) if kw else text
+
+
+def _repo_root_for(path: Path) -> Path:
+    """Thu muc git gan nhat phia tren file (khong len toi thu muc nha); khong co thi la thu muc chua file."""
+    start = Path(path).resolve().parent
+    home = Path.home().resolve()
+    for d in [start, *start.parents]:
+        if d == home:
+            break
+        if (d / ".git").exists():
+            return d
+    return start
+
+
+def _mm_error_text(exc: BaseException, lang: str = DEFAULT_UI_LANG) -> str:
+    detail = ((str(exc).strip().splitlines() or [type(exc).__name__])[0])[:300]
+    return ui_text("check_error", lang, detail=detail)
+
+
+def _mm_ev(e) -> dict:
+    if not isinstance(e, dict):
+        return {"kind": "", "text": str(e)}
+    return {str(k): (v if v is None or isinstance(v, (str, int, float, bool)) else str(v))
+            for k, v in e.items()}
+
+
+def _mm_group(items: list) -> dict:
+    """Dem phat hien cua mot nhom (vd. 'Chung', phat hien khong thuoc tai lieu nao)."""
+    counts = {"error": 0, "warning": 0, "info": 0}
+    for x in items:
+        counts[x["severity"]] = counts.get(x["severity"], 0) + 1
+    tier = ("error" if counts["error"] else "warning" if counts["warning"]
+            else "info" if counts["info"] else "clean")
+    return {"tier": tier, "count": len(items), **counts}
+
+
+def _mm_payload(res) -> dict:
+    """Ket qua soat -> du lieu JSON: tai lieu (xep loai nang truoc) + phat hien theo tai lieu."""
+    findings: dict[str, list] = {}
+    for f in res.findings:
+        findings.setdefault(f.path, []).append({
+            "path": f.path, "rule": f.rule, "severity": f.severity, "line": int(f.line or 0), "col": int(f.col or 1),
+            "message": f.message, "suggestion": f.suggestion or "", "claim": str(f.claim or ""),
+            "evidence": [_mm_ev(e) for e in (f.evidence or [])],
+        })
+    docs = []
+    for path, s in res.doc_stats.items():
+        tier = ("error" if s["error"] else "warning" if s["warning"]
+                else "info" if s["info"] else "clean")
+        docs.append({
+            "path": path, "name": posixpath.basename(path), "title": str(s.get("title", "")),
+            "tier": tier, "error": int(s["error"]), "warning": int(s["warning"]), "info": int(s["info"]),
+            "claims": int(s["claims"]), "broken": int(s["broken"]),
+        })
+    docs.sort(key=lambda d: (MM_TIER_RANK[d["tier"]], -d["error"], -d["warning"], -d["info"], d["path"]))
+    # phat hien khong thuoc tai lieu nao (vd. luat forbid ban trong code): nhom 'Chung' trong UI
+    outside = [item for p, items in findings.items() if p not in res.doc_stats for item in items]
+    st = res.stats
+    summary = {
+        "root": res.root, "docs": int(st["docs"]), "error": int(st["error"]),
+        "warning": int(st["warning"]), "info": int(st["info"]), "claims": int(st["claims"]),
+        "git": bool(st["git"]), "git_unanswered": int(st.get("git_unanswered", 0)),
+        "outside": len(outside),
+        "seconds": round(float(res.timings.get("total", 0.0)), 2),
+    }
+    return {"summary": summary, "docs": docs, "findings": findings, "outside": outside,
+            "outside_group": _mm_group(outside) if outside else None}
+
+
 class MdHtmlAPI:
     """Backend cho UI pywebview. Frontend goi qua window.pywebview.api.*."""
 
@@ -94,6 +231,11 @@ class MdHtmlAPI:
         self._rev = 0
         self._settings: dict = {}
         self._saved = self._load_state()
+        self._mm_lock = threading.Lock()
+        self._mm: dict[str, Any] = {"running": False, "root": "", "error": "", "started": 0.0,
+                                    "checked_at": 0.0, "result": None}
+        self._mm_root = str(self._saved.get("mindmap_root", "") or "")
+        self._ui_lang = _norm_lang(self._saved.get("ui_lang")) or DEFAULT_UI_LANG
         saved_output = self._saved.get("output_dir")
         if saved_output and Path(saved_output).is_dir():
             self._output_dir = Path(saved_output)
@@ -158,14 +300,31 @@ class MdHtmlAPI:
             "cache_mode": self._cache_mode,
             "watch": self._watch_enabled,
             "revision": self._rev,
+            "ui_lang": _norm_lang(self._saved.get("ui_lang")),
             "version": _tool_version(self._root),
         }
+
+    def _t(self, key: str, **kw) -> str:
+        return ui_text(key, self._ui_lang, **kw)
+
+    def set_ui_lang(self, lang: str, persist: bool = True):
+        """Ngon ngu giao dien (vi/en). persist=False: chi nho trong phien; frontend tu doan theo trinh duyet thi goi vay."""
+        norm = _norm_lang(lang)
+        if not norm:
+            return {"ok": False, "error": self._t("bad_lang")}
+        self._ui_lang = norm
+        if persist:
+            self._save_state({"ui_lang": norm})
+        return {"ok": True, "lang": norm, "saved": bool(persist)}
 
     def _files_payload(self, include_stats: bool = False) -> list:
         out = []
         for p in self._files:
-            item = _file_brief(p) if include_stats else {"name": p.name, "path": str(p), "stats": ""}
-            item.update(self._rec(p, create=False))
+            item = _file_brief(p, self._ui_lang) if include_stats else {"name": p.name, "path": str(p), "stats": ""}
+            rec = self._rec(p, create=False)
+            if include_stats:  # stats theo ngon ngu giao dien; chuoi cache luu theo ngon ngu luc render
+                rec = {k: v for k, v in rec.items() if k != "stats"}
+            item.update(rec)
             out.append(item)
         return out
 
@@ -491,8 +650,8 @@ class MdHtmlAPI:
         try:
             p = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa chọn file."}
-        return {"ok": True, "stats": preview_stats(str(p)), "name": p.name}
+            return {"ok": False, "error": self._t("no_file")}
+        return {"ok": True, "stats": preview_stats(str(p), self._ui_lang), "name": p.name}
 
     # -- options --
     def _cleanup_beside_caches(self):
@@ -562,7 +721,7 @@ class MdHtmlAPI:
         try:
             p = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa có file để xem."}
+            return {"ok": False, "error": self._t("no_preview")}
         s = _sanitize_settings(settings)
         self._settings = s
         self._save_state({"settings": s})
@@ -573,7 +732,7 @@ class MdHtmlAPI:
                 "ok": True, "name": p.name, "path": str(p), "out": res.get("path", ""),
                 "url": self._file_url(res.get("path", ""),
                                       f"{int(rec.get('revision', 0))}-{int(res.get('mtime', 0))}"),
-                "stats": str(res.get("stats", "") or preview_stats(str(p))),
+                "stats": preview_stats(str(p), self._ui_lang),
                 "state": res.get("state", "fresh"), "fallback": bool(res.get("fallback")),
                 "revision": int(rec.get("revision", 0)), "date": str(res.get("date", "")),
                 "out_size": int(rec.get("out_size", 0)),
@@ -582,14 +741,15 @@ class MdHtmlAPI:
         try:
             md_text = p.read_text(encoding="utf-8-sig")
         except OSError as exc:
-            return {"ok": False, "error": f"Không đọc được file: {exc}"}
+            return {"ok": False, "error": self._t("read_failed", exc=exc)}
         single = len(self._files) == 1
         inline = render_text(
             md_text, p.name, title=(s["title"] if single else ""), eyebrow=s["eyebrow"],
             lang=s["lang"], no_toc=s["no_toc"], date_str=s["date"])
         if not inline.get("ok"):
-            return {"ok": False, "error": str(inline.get("error") or res.get("msg") or "Lỗi render.")}
-        return {"ok": True, "inline": True, "html": inline["html"], "stats": inline["stats"],
+            return {"ok": False, "error": str(inline.get("error") or res.get("msg") or self._t("render_error"))}
+        return {"ok": True, "inline": True, "html": inline["html"],
+                "stats": preview_stats_of_text(md_text, p.name, self._ui_lang),
                 "name": p.name, "path": str(p), "out": "", "url": "", "state": "inline",
                 "fallback": True, "revision": int(rec.get("revision", 0)),
                 "error": res.get("msg", "")}
@@ -599,11 +759,11 @@ class MdHtmlAPI:
         try:
             p = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa có file để preview."}
+            return {"ok": False, "error": self._t("no_preview_alt")}
         try:
             md_text = p.read_text(encoding="utf-8-sig")
         except OSError as exc:
-            return {"ok": False, "error": f"Không đọc được file: {exc}"}
+            return {"ok": False, "error": self._t("read_failed", exc=exc)}
         s = settings or {}
         single = len(self._files) == 1
         res = render_text(
@@ -615,6 +775,7 @@ class MdHtmlAPI:
         if not res.get("ok"):
             return res
         res["name"] = p.name
+        res["stats"] = preview_stats_of_text(md_text, p.name, self._ui_lang)
         self._save_state({"settings": _sanitize_settings(s)})
         return res
 
@@ -640,7 +801,7 @@ class MdHtmlAPI:
                     except OSError:
                         rec = self._status.get(key)
                         if rec and rec.get("state") != "missing":
-                            rec.update(state="missing", msg="File đã bị xoá hoặc đổi tên.")
+                            rec.update(state="missing", msg=self._t("missing_file"))
                             self._rev += 1
                         continue
                     cur = (int(st.st_mtime_ns), int(st.st_size))
@@ -691,7 +852,7 @@ class MdHtmlAPI:
     def open_output(self):
         target = str(self._output_dir) if self._output_dir else ""
         if not target or not Path(target).is_dir():
-            return {"ok": False, "error": "Chưa có thư mục output để mở."}
+            return {"ok": False, "error": self._t("no_output_dir")}
         try:
             _open_path(target)
         except Exception as exc:
@@ -703,9 +864,9 @@ class MdHtmlAPI:
         try:
             src = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa chọn file."}
+            return {"ok": False, "error": self._t("no_file")}
         if not self._window:
-            return {"ok": False, "error": "Không mở được hộp thoại lưu."}
+            return {"ok": False, "error": self._t("save_dialog_failed")}
         dest = self._save_dialog(src.stem + ".html", str(src.parent))
         if not dest:
             return {"ok": False, "cancelled": True}
@@ -730,12 +891,12 @@ class MdHtmlAPI:
         try:
             p = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa chọn file."}
+            return {"ok": False, "error": self._t("no_file")}
         s = _sanitize_settings(settings)
         self._settings = s
         res = self._render_one(p, s)
         if not res.get("ok"):
-            return {"ok": False, "error": res.get("msg") or "Chưa render được."}
+            return {"ok": False, "error": res.get("msg") or self._t("not_rendered")}
         try:
             _open_path(res["path"])
         except Exception as exc:
@@ -746,7 +907,7 @@ class MdHtmlAPI:
         try:
             p = self._files[int(index)]
         except Exception:
-            return {"ok": False, "error": "Chưa chọn file."}
+            return {"ok": False, "error": self._t("no_file")}
         try:
             _reveal_path(str(p))
         except Exception as exc:
@@ -757,13 +918,13 @@ class MdHtmlAPI:
     def start_batch(self, settings: dict):
         with self._job_lock:
             if self._job.get("running"):
-                return {"ok": False, "error": "Đang có một batch chạy."}
+                return {"ok": False, "error": self._t("batch_running")}
             if not self._files:
-                return {"ok": False, "error": "Chưa có file đầu vào."}
+                return {"ok": False, "error": self._t("no_input")}
             self._cancel.clear()
             self._job = {
                 "running": True, "kind": "export", "done": 0, "total": len(self._files),
-                "current": "Chuẩn bị…", "outputs": [], "errors": [], "cancelled": False,
+                "current": self._t("job_prepare"), "outputs": [], "errors": [], "cancelled": False,
                 "started": time.time(),
             }
         s = _sanitize_settings(settings)
@@ -791,7 +952,7 @@ class MdHtmlAPI:
                     self._job.update(done=i + 1, total=len(files), current=src.name)
             with self._job_lock:
                 self._job.update(
-                    running=False, current="Hoàn tất",
+                    running=False, current=self._t("job_done"),
                     outputs=outputs, errors=errors,
                     cancelled=self._cancel.is_set(), finished=time.time())
 
@@ -802,13 +963,13 @@ class MdHtmlAPI:
         """Auto-cache: render lai (neu can) cho tat ca file trong queue."""
         with self._job_lock:
             if self._job.get("running"):
-                return {"ok": False, "error": "Đang có một batch chạy."}
+                return {"ok": False, "error": self._t("batch_running")}
             if not self._files:
-                return {"ok": False, "error": "Chưa có file đầu vào."}
+                return {"ok": False, "error": self._t("no_input")}
             self._cancel.clear()
             self._job = {
                 "running": True, "kind": "cache", "done": 0, "total": len(self._files),
-                "current": "Chuẩn bị…", "outputs": [], "errors": [], "cancelled": False,
+                "current": self._t("job_prepare"), "outputs": [], "errors": [], "cancelled": False,
                 "started": time.time(),
             }
         s = _sanitize_settings(settings)
@@ -830,7 +991,7 @@ class MdHtmlAPI:
                     self._job.update(done=i + 1, total=len(files), current=src.name)
             with self._job_lock:
                 self._job.update(
-                    running=False, current="Hoàn tất",
+                    running=False, current=self._t("job_done"),
                     outputs=outputs, errors=errors,
                     cancelled=self._cancel.is_set(), finished=time.time())
 
@@ -844,3 +1005,108 @@ class MdHtmlAPI:
     def cancel_batch(self):
         self._cancel.set()
         return {"ok": True}
+
+    # -- Mind Map: soat tai lieu o nen, UI doc ket qua (mindmap/ khong bi sua o day) --
+    def _mm_pick_root(self, index, root: str):
+        """(thu muc can soat, loi). Uu tien: thu muc chon tay > thu muc git cua file dang chon
+        > thu muc nho lan truoc > file dau hang doi."""
+        if root:
+            p = Path(str(root))
+            return (p, "") if p.is_dir() else (None, self._t("folder_gone"))
+        try:
+            i = int(index) if index is not None else -1
+        except (TypeError, ValueError):
+            i = -1
+        if 0 <= i < len(self._files):
+            return _repo_root_for(self._files[i]), ""
+        if self._mm_root and Path(self._mm_root).is_dir():
+            return Path(self._mm_root), ""
+        if self._files:
+            return _repo_root_for(self._files[0]), ""
+        return None, self._t("nothing_to_check")
+
+    def mindmap_start(self, index: int = -1, root: str = "", force: bool = False, lang: str = ""):
+        """Soat thu muc o luong nen, tra ve ngay. UI hoi mindmap_status() toi khi xong.
+        Da co ket qua cho cung thu muc va khong force thi tra cached=True, khong soat lai."""
+        lang = _norm_lang(lang) or self._ui_lang
+        target, err = self._mm_pick_root(index, root)
+        if target is None:
+            return {"ok": False, "error": err}
+        target = target.resolve()
+        with self._mm_lock:
+            if self._mm["running"]:
+                return {"ok": False, "error": self._t("check_running")}
+            res = self._mm["result"]
+            if not force and res and res["summary"]["root"] == str(target) and res.get("lang") == lang:
+                return {"ok": True, "cached": True, "root": str(target)}
+            self._mm.update(running=True, root=str(target), error="", started=time.time())
+        self._mm_root = str(target)
+        self._save_state({"mindmap_root": self._mm_root})
+        threading.Thread(target=self._mm_worker, args=(target, lang), name="mindmap-check", daemon=True).start()
+        return {"ok": True, "cached": False, "root": str(target)}
+
+    def _mm_worker(self, root: Path, lang: str = DEFAULT_UI_LANG):
+        try:
+            from mindmap import engine  # nap luoi: loi cua Mind Map khong lam hong ca app
+            payload, error = _mm_payload(engine.run(root, lang=lang)), ""
+            payload["lang"] = lang
+        except Exception as exc:  # noqa: BLE001 -- UI can mot dong chu, khong phai vet loi
+            payload, error = None, _mm_error_text(exc, lang)
+        with self._mm_lock:
+            self._mm.update(running=False, result=payload, error=error, checked_at=time.time())
+
+    def mindmap_status(self):
+        with self._mm_lock:
+            mm = dict(self._mm)
+        res = mm["result"] or {}
+        same_root = bool(res) and res["summary"]["root"] == mm["root"]
+        return {
+            "running": bool(mm["running"]), "root": mm["root"], "error": mm["error"],
+            "started": mm["started"], "checked_at": mm["checked_at"],
+            "summary": res["summary"] if same_root else None,
+            "docs": res["docs"] if same_root else [],
+            "outside": res["outside_group"] if same_root else None,
+        }
+
+    def mindmap_findings(self, path: str):
+        """Phat hien cua mot tai lieu trong ket qua soat (chi doc bo nho, khong doc file)."""
+        key = str(path or "").replace("\\", "/")
+        with self._mm_lock:
+            res = self._mm["result"]
+        if not res:
+            return {"ok": False, "error": self._t("no_results")}
+        doc = next((d for d in res["docs"] if d["path"] == key), None)
+        if doc is None:
+            return {"ok": False, "error": self._t("doc_not_in_results")}
+        return {"ok": True, "doc": doc, "findings": res["findings"].get(key, [])}
+
+    def mindmap_outside(self):
+        """Phat hien khong thuoc tai lieu nao (nhom 'Chung'); khong co file de xem truoc."""
+        with self._mm_lock:
+            res = self._mm["result"]
+        if not res:
+            return {"ok": False, "error": self._t("no_results")}
+        return {"ok": True, "findings": res["outside"]}
+
+    def mindmap_open(self, path: str):
+        """Dua mot tai lieu trong ket qua soat vao hang doi de preview ben giua; tra ve chi so cua no."""
+        key = str(path or "").replace("\\", "/")
+        with self._mm_lock:
+            res = self._mm["result"]
+        if not res or key not in {d["path"] for d in res["docs"]}:
+            return {"ok": False, "error": self._t("doc_not_in_results")}
+        root = Path(res["summary"]["root"]).resolve()
+        target = (root / key).resolve()
+        if root not in target.parents or not target.is_file():
+            return {"ok": False, "error": self._t("file_gone")}
+        self._merge_files([str(target)])
+        idx = next((i for i, p in enumerate(self._files) if _norm_key(p) == _norm_key(target)), -1)
+        self._schedule_sync()
+        return {"ok": idx >= 0, "index": idx, "files": self._files_payload(),
+                "error": "" if idx >= 0 else self._t("queue_add_failed")}
+
+    def mindmap_choose_root(self):
+        folder = self._folder_dialog()
+        if not folder:
+            return {"ok": False, "cancelled": True}
+        return self.mindmap_start(root=folder, force=True)

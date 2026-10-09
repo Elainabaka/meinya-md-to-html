@@ -48,10 +48,10 @@ def test_near_miss_path_is_a_typo_warning(repo):
     assert f.severity == "warning" and "src/helper.py" in f.suggestion
 
 
-def test_path_that_never_existed_without_near_match_is_quiet(repo):
+def test_path_that_never_existed_is_a_note_outside_agent_files(repo):
     repo.write("src/helper.py", "x = 1\n")
-    repo.write("README.md", "# App\n\nOutput goes to `out/report.csv`.\n").commit()
-    assert rules(run(repo)) == []
+    repo.write("README.md", "# App\n\nSee `src/notes/old_cli.py`.\n").commit()
+    assert rules(run(repo)) == [("path-missing", "info", "README.md", 3)]
 
 
 def test_uncommitted_delete_is_reported(repo):
@@ -313,9 +313,10 @@ def test_bad_forbid_rule_is_reported(repo):
 def test_works_without_git():
     r = Repo(git=False)
     try:
+        r.write("src/helper.py", "x = 1\n")
         r.write("README.md", "# A\n\nSee [x](missing.md) and `src/nothere.py`.\n")
         res = run(r)
-        assert [f.rule for f in res.findings] == ["link-broken"]
+        assert sorted(f.rule for f in res.findings) == ["link-broken", "path-missing"]
         assert res.stats["git"] is False
     finally:
         r.cleanup()
@@ -754,3 +755,79 @@ def test_a_place_the_reader_is_told_to_use_is_in_their_project(repo):
                                        "`docs/public/_headers`.\nRead `docs/public/_headers` for the rules.\n").commit("add")
     repo.remove("docs/public/_headers").commit("drop headers")
     assert [(f.rule, f.line) for f in run(repo).findings] == [("path-moved", 4)]
+
+
+# -- CONTRACT TEST: round 3 of the twenty repos (09/10/2026). Make these pass; do not edit them.
+
+def test_a_heading_with_escaped_characters_keeps_its_anchor(repo):
+    # pnpm.io: `### --access &lt;public|restricted\>` is `#--access-publicrestricted` on the built site
+    repo.write("docs/cli/publish.md", "# publish\n\n### --access &lt;public|restricted\\>\n\nWho can see it.\n")
+    repo.write("docs/cli/login.md", "# login\n\n### --scope &lt;scope\\>\n\nThe scope.\n")
+    repo.write("docs/guide.md", "# Guide\n\nSee [access](cli/publish.md#--access-publicrestricted) "
+                                "and [scope](cli/login.md#--scope-scope).\n").commit()
+    assert run(repo).findings == []
+    from mindmap.mdscan import github_slug, plain_heading
+    assert github_slug("--access &lt;public|restricted\\>") == "--access-publicrestricted"
+    assert plain_heading("Tom &amp; Jerry \\*not bold\\*") == "Tom & Jerry *not bold*"
+    assert plain_heading("`a&lt;b` and **bold**") == "a&lt;b and bold"      # a code span stays literal
+
+
+def test_a_heading_from_a_partial_the_page_imports_is_on_the_page(repo):
+    # Docusaurus MDX: `import X from './_x.mdx'` and `<X />` put the partial's headings on the page
+    repo.write("docs/settings/_enablePrePostScripts.mdx", "### enablePrePostScripts\n\nRun pre and post scripts.\n")
+    repo.write("docs/settings/other.md", "# Other\n\n### stateDir\n\nWhere state lives.\n\n"
+                                         "import EnablePrePostScripts from './_enablePrePostScripts.mdx'\n\n"
+                                         "<EnablePrePostScripts />\n")
+    repo.write("docs/settings.md", "# Settings\n\n* [enablePrePostScripts](./settings/other.md#enableprepostscripts)\n"
+                                   "* [stateDir](./settings/other.md#statedir)\n"
+                                   "* [gone](./settings/other.md#nosuchsetting)\n").commit()
+    assert [(f.rule, f.path, f.line) for f in run(repo).findings if f.severity != "info"] == \
+        [("anchor-missing", "docs/settings.md", 5)]
+
+
+def test_a_docusaurus_link_falls_back_to_the_docs_root(repo):
+    # Docusaurus resolves `catalogs.md` written in docs/cli/add.md next to the page first, then from the docs root
+    repo.write("sidebars.json", "{}\n")
+    repo.write("docs/catalogs.md", "# Catalogs\n\nShared versions.\n")
+    repo.write("docs/cli/add.md", "# add\n\nSave it to the [catalog].\n\n[catalog]: catalogs.md\n\n"
+                                  "See [nothing](nothere.md).\n").commit()
+    assert [(f.rule, f.path, f.line) for f in run(repo).findings if f.severity != "info"] == \
+        [("link-broken", "docs/cli/add.md", 7)]
+
+
+def test_a_docusaurus_site_in_its_own_folder_has_its_own_docs_root(repo):
+    repo.write("website/docusaurus.config.js", "module.exports = {}\n")
+    repo.write("website/docs/intro.md", "# Intro\n\nHello.\n")
+    repo.write("website/docs/guides/setup.md", "# Setup\n\nRead the [intro](intro.md) first.\n").commit()
+    assert run(repo).findings == []
+
+
+def test_without_a_docusaurus_site_the_link_is_read_as_github_reads_it(repo):
+    repo.write("docs/catalogs.md", "# Catalogs\n\nShared versions.\n")
+    repo.write("docs/cli/add.md", "# add\n\nSave it to the [catalog](catalogs.md).\n").commit()
+    assert [(f.rule, f.path, f.line) for f in run(repo).findings if f.severity != "info"] == \
+        [("link-broken", "docs/cli/add.md", 3)]
+
+
+def test_an_archived_docs_tree_is_a_record(repo):
+    from mindmap.doctype import classify
+    assert classify("versioned_docs_archived/version-9.x/faq.md") == "history"
+    assert classify("versioned_docs/version-9.x/faq.md") == "history"
+    assert classify("docs/faq.md") == "live"
+    line = "Set the network concurrency to {} for faster installs on most machines today.\n"
+    repo.write("versioned_docs_archived/version-9.x/npmrc.md", "# npmrc\n\n" + line.format(16)).commit("v9")
+    repo.write("docs/settings.md", "# Settings\n\n" + line.format(22)).commit("v10")
+    assert run(repo).findings == []
+
+
+def test_the_output_after_a_prompt_in_a_code_block_is_an_example(repo):
+    # fd's README: `❯ fd --extension rs | tree --fromfile`, then the tree it printed back then
+    tree = ".\n├── build.rs\n└── src\n    └── app.rs\n"
+    repo.write("build.rs", "fn main() {}\n").write("src/app.rs", "pub fn app() {}\n")
+    repo.write("README.md", "# fd\n\n```bash\n❯ fd --extension rs | tree --fromfile\n" + tree + "```\n\n"
+                            "```console\n$ ls\nbuild.rs\n```\n")
+    # without a prompt the block draws the repo itself: a drawing that went stale is still reported
+    repo.write("docs/layout.md", "# Layout\n\n```\n" + tree + "```\n").commit("add")
+    repo.remove("build.rs").remove("src/app.rs").write("src/cli.rs", "pub fn cli() {}\n").commit("drop")
+    got = [(f.rule, f.path) for f in run(repo).findings if f.severity != "info"]
+    assert got and all(p == "docs/layout.md" for _, p in got)

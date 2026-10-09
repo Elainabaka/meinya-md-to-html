@@ -31,13 +31,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 from .files import is_private, kind_of
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-AGENT_FILES = ("CLAUDE.md", "AGENTS.md", "GEMINI.md", ".claude/CLAUDE.md", "CLAUDE.local.md",
+AGENT_FILES = ("CLAUDE.md", "AGENTS.md", "AGENTS.override.md", "GEMINI.md", ".claude/CLAUDE.md", "CLAUDE.local.md",
                ".github/copilot-instructions.md", ".cursorrules", ".windsurfrules")
 MAX_ITEMS = 10
 
@@ -71,15 +72,63 @@ def _finding_lines(findings: list, limit: int = MAX_ITEMS) -> list:
 
 
 def post_tool(root: Path, data: dict) -> str:
-    if data.get("tool_name") not in EDIT_TOOLS:
+    if not isinstance(data, dict):
         return ""
-    ti = data.get("tool_input") or {}
-    fp = ti.get("file_path") or ti.get("notebook_path")
-    if not fp:
+    tool = data.get("tool_name")
+    if not isinstance(tool, str):
         return ""
-    path = Path(fp)
-    path = path if path.is_absolute() else root / path
-    rel = _rel(path.resolve(), root)
+    ti = data.get("tool_input")
+    paths = []
+    base = root
+    if tool.lower() in {"apply_patch", "applypatch"}:
+        cwd = data.get("cwd")
+        if cwd is not None and not isinstance(cwd, str):
+            return ""
+        try:
+            base = Path(cwd) if cwd else root
+            if not base.is_absolute():
+                base = root / base
+        except (OSError, ValueError):
+            return ""
+        pending = [ti]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, str):
+                paths.extend(re.findall(
+                    r"(?m)^\*\*\* (?:Update File|Add File|Delete File|Move to):[ \t]*(.+?)[ \t]*\r?$",
+                    value,
+                ))
+            elif isinstance(value, dict):
+                pending.extend(reversed(list(value.values())))
+            elif isinstance(value, list):
+                pending.extend(reversed(value))
+    elif tool in EDIT_TOOLS and isinstance(ti, dict):
+        path = ti.get("file_path") or ti.get("notebook_path")
+        if isinstance(path, str) and path.strip():
+            paths.append(path)
+    else:
+        return ""
+    reports = []
+    seen = set()
+    for filename in paths:
+        if not filename.strip() or "\0" in filename:
+            continue
+        try:
+            path = Path(filename)
+            path = (path if path.is_absolute() else base / path).resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if path in seen:
+            continue
+        seen.add(path)
+        report = _post_file(root, path)
+        if report:
+            reports.append(report)
+    return "\n\n".join(reports)
+
+
+def _post_file(root: Path, path: Path) -> str:
+    rel = _rel(path, root)
     if rel is None or is_private(rel):
         return ""
     lang = _lang(root)
@@ -143,6 +192,8 @@ def main(event: str = "auto", root: str | None = None) -> int:
         raw = sys.stdin.buffer.read()
         data = json.loads(raw.decode("utf-8", "replace") or "{}")
         if not isinstance(data, dict):
+            return 0
+        if data.get("cwd") is not None and not isinstance(data["cwd"], str):
             return 0
     except Exception:
         return 0

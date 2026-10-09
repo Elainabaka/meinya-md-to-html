@@ -9,9 +9,10 @@
 <body>
 <header class="topbar">
   <div class="brand"><span class="mark"></span><span class="logo">MD&nbsp;&rarr;&nbsp;HTML</span></div>
-  <div class="crumb" id="crumb" title="">Ch&#432;a ch&#7885;n file</div>
+  <div class="crumb" id="crumb" title="">Chưa chọn file</div>
   <div class="top-right">
-    <button class="icon-btn" id="btnTheme" title="S&aacute;ng / t&#7889;i">&#9681;</button>
+    <button class="icon-btn" id="btnTheme" data-i18n-title="theme.title" title="Sáng / tối">&#9681;</button>
+    <button class="icon-btn lang-btn" id="btnLang" data-i18n-title="lang.title" title="Ngôn ngữ giao diện">VI</button>
     <span class="ver" id="ver">v2.2.0</span>
   </div>
 </header>
@@ -20,31 +21,48 @@
   <!-- 1: nguon -->
   <section class="col col-files" id="colFiles">
     <div class="col-head">
-      <span class="ttl">Ngu&#7891;n</span>
+      <div class="seg" role="tablist">
+        <button class="seg-btn on" id="tabSrc" data-mode="src" data-i18n="tab.source">Nguồn</button>
+        <button class="seg-btn" id="tabMM" data-mode="mm" data-i18n-title="tab.mmTitle" title="Soát tài liệu: đường dẫn, link, lệnh, cờ, tên có khớp code không">Mind Map</button>
+      </div>
       <span class="count" id="fileCount">0</span>
+      <span class="count" id="mmCount" hidden>0</span>
       <span class="spacer"></span>
-      <button class="icon-btn sm" id="btnHide1" title="&#7842;n/hi&#7879;n c&#7897;t (Ctrl+1)">&lsaquo;</button>
+      <button class="icon-btn sm" id="btnHide1" data-i18n-title="btn.hide1" title="Ẩn/hiện cột (Ctrl+1)">&lsaquo;</button>
     </div>
-    <div class="col-body">
+    <div class="col-body" id="srcBody">
       <div class="dropzone" id="dropzone">
         <div class="dz-ico">&darr;</div>
-        <div class="dz-text">K&eacute;o-th&#7843; <b>.md</b> v&agrave;o &dstrok;&acirc;y</div>
-        <div class="dz-sub">ho&#7863;c d&ugrave;ng n&uacute;t b&ecirc;n d&#432;&#7899;i</div>
+        <div class="dz-text" data-i18n-html="src.dropHtml">Kéo-thả <b>.md</b> vào đây</div>
+        <div class="dz-sub" data-i18n="src.dropSub">hoặc dùng nút bên dưới</div>
       </div>
       <div class="row btns">
-        <button id="btnAdd" class="soft">+ Th&ecirc;m file</button>
-        <button id="btnFolder" class="soft">Th&#432; m&#7909;c</button>
-        <button id="btnClear" class="ghost" title="X&oacute;a h&#7871;t danh s&aacute;ch">X&oacute;a</button>
+        <button id="btnAdd" class="soft" data-i18n="src.add">+ Thêm file</button>
+        <button id="btnFolder" class="soft" data-i18n="src.folder">Thư mục</button>
+        <button id="btnClear" class="ghost" data-i18n="src.clear" data-i18n-title="src.clearTitle" title="Xóa hết danh sách">Xóa</button>
       </div>
-      <label class="chk sm"><input type="checkbox" id="optRec"> Qu&eacute;t th&#432; m&#7909;c con</label>
-      <input id="filter" class="filter" type="search" placeholder="L&#7885;c file&hellip; (Ctrl+K)" autocomplete="off">
+      <label class="chk sm"><input type="checkbox" id="optRec"> <span data-i18n="src.recursive">Quét thư mục con</span></label>
+      <input id="filter" class="filter" type="search" data-i18n-placeholder="src.filter" placeholder="Lọc file… (Ctrl+K)" autocomplete="off">
       <ul class="filelist" id="fileList"></ul>
-      <div class="list-empty" id="listEmpty">Ch&#432;a c&oacute; file .md n&agrave;o.</div>
+      <div class="list-empty" id="listEmpty" data-i18n="src.empty">Chưa có file .md nào.</div>
+    </div>
+    <div class="col-body" id="mmBody" hidden>
+      <div class="mm-root" id="mmRoot" title="">Chưa chọn thư mục</div>
+      <div class="row btns">
+        <button id="btnMMCheck" class="soft" data-i18n="mm.check">Kiểm lại</button>
+        <button id="btnMMRoot" class="ghost" data-i18n="mm.changeRoot" data-i18n-title="mm.changeRootTitle" title="Chọn thư mục khác để soát">Đổi thư mục…</button>
+      </div>
+      <div class="mm-sum" id="mmSum">Chưa soát.</div>
+      <div class="mm-busy" id="mmBusy" hidden><span class="spin"></span><span id="mmBusyTxt">Đang soát…</span></div>
+      <div class="mm-err" id="mmErr" hidden></div>
+      <input id="mmFilter" class="filter" type="search" data-i18n-placeholder="mm.filter" placeholder="Lọc tài liệu…" autocomplete="off">
+      <ul class="filelist" id="mmList"></ul>
+      <div class="list-empty" id="mmEmpty" hidden></div>
     </div>
     <div class="col-foot" id="queueFoot">&mdash;</div>
   </section>
 
-  <div class="split" id="split1" title="K&eacute;o &dstrok;&#7875; &dstrok;&#7893;i k&iacute;ch th&#432;&#7899;c &middot; double-click reset"></div>
+  <div class="split" id="split1" title="Kéo để đổi kích thước · double-click reset"></div>
 
   <!-- 2: preview -->
   <section class="col col-preview" id="colPreview">
@@ -54,68 +72,77 @@
       <span class="badge" id="prevBadge" hidden></span>
       <span class="spacer"></span>
       <span class="zoom">
-        <button class="icon-btn sm" id="btnZoomOut" title="Thu nh&#7887; (Ctrl+-)">&minus;</button>
-        <button class="icon-btn sm" id="btnZoomReset" title="100% (Ctrl+0)">100%</button>
-        <button class="icon-btn sm" id="btnZoomIn" title="Ph&oacute;ng to (Ctrl+=)">+</button>
+        <button class="icon-btn sm" id="btnZoomOut" data-i18n-title="pv.zoomOut" title="Thu nhỏ (Ctrl+-)">&minus;</button>
+        <button class="icon-btn sm" id="btnZoomReset" data-i18n-title="pv.zoomReset" title="100% (Ctrl+0)">100%</button>
+        <button class="icon-btn sm" id="btnZoomIn" data-i18n-title="pv.zoomIn" title="Phóng to (Ctrl+=)">+</button>
       </span>
-      <button class="icon-btn sm" id="btnReload" title="Render l&#7841;i (F5)">&#8635;</button>
-      <button class="icon-btn sm" id="btnOpen" title="M&#7903; HTML trong tr&igrave;nh duy&#7879;t">M&#7903; &nearr;</button>
+      <button class="icon-btn sm" id="btnReload" data-i18n-title="pv.reload" title="Render lại (F5)">&#8635;</button>
+      <button class="icon-btn sm" id="btnOpen" data-i18n="btn.open" data-i18n-title="pv.open" title="Mở HTML trong trình duyệt">Mở &nearr;</button>
     </div>
     <div class="prev-wrap">
       <iframe id="preview" title="preview"></iframe>
       <div class="empty-state" id="emptyState">
         <div class="es-ico">&#128196;</div>
-        <div class="es-title">Th&#7843; file .md &dstrok;&#7875; xem tr&#432;&#7899;c</div>
-        <div class="es-sub">HTML &dstrok;&#432;&#7907;c cache t&#7921; &dstrok;&#7897;ng c&#7841;nh file g&#7889;c &mdash; kh&ocirc;ng c&#7847;n b&#7845;m Convert.</div>
+        <div class="es-title" id="esTitle">Thả file .md để xem trước</div>
+        <div class="es-sub" id="esSub">HTML được cache tự động cạnh file gốc — không cần bấm Convert.</div>
       </div>
     </div>
     <div class="prev-foot">
-      <span class="st" id="status">S&#7861;n s&agrave;ng.</span>
+      <span class="st" id="status">Sẵn sàng.</span>
       <div class="prog" id="prog" hidden><div class="prog-bar" id="progBar"></div></div>
     </div>
   </section>
 
-  <div class="split" id="split2" title="K&eacute;o &dstrok;&#7875; &dstrok;&#7893;i k&iacute;ch th&#432;&#7899;c &middot; double-click reset"></div>
+  <div class="split" id="split2" title="Kéo để đổi kích thước · double-click reset"></div>
 
   <!-- 3: tuy chon -->
   <section class="col col-opts" id="colOpts">
     <div class="col-head">
-      <span class="ttl">Tu&#7923; ch&#7885;n</span>
+      <span class="ttl" id="optsTtl">Tuỳ chọn</span>
       <span class="spacer"></span>
-      <button class="icon-btn sm" id="btnHide3" title="&#7842;n/hi&#7879;n c&#7897;t (Ctrl+3)">&rsaquo;</button>
+      <button class="icon-btn sm" id="btnHide3" data-i18n-title="btn.hide3" title="Ẩn/hiện cột (Ctrl+3)">&rsaquo;</button>
     </div>
-    <div class="col-body">
-      <label class="fld">Ti&ecirc;u &dstrok;&#7873; <span class="mut">(1 file)</span>
-        <input id="optTitle" placeholder="Tr&#7889;ng = l&#7845;y d&ograve;ng # &dstrok;&#7847;u">
+    <div class="col-body" id="optsBody">
+      <label class="fld"><span data-i18n="opt.title">Tiêu đề</span> <span class="mut" data-i18n="opt.titleHint">(1 file)</span>
+        <input id="optTitle" data-i18n-placeholder="opt.titlePh" placeholder="Trống = lấy dòng # đầu">
       </label>
       <div class="fld-row">
         <label class="fld">Eyebrow
-          <input id="optEyebrow" value="T&agrave;i li&#7879;u k&#7929; thu&#7853;t">
+          <input id="optEyebrow" value="Tài liệu kỹ thuật">
         </label>
         <label class="fld narrow">Lang
           <select id="optLang"><option value="vi">vi</option><option value="en">en</option></select>
         </label>
       </div>
-      <label class="fld">Ng&agrave;y <span class="mut">(tr&#7889;ng = h&ocirc;m nay)</span>
+      <label class="fld"><span data-i18n="opt.date">Ngày</span> <span class="mut" data-i18n="opt.dateHint">(trống = hôm nay)</span>
         <input id="optDate" placeholder="20/09/2026">
       </label>
-      <label class="chk"><input type="checkbox" id="optNoToc"> T&#7855;t m&#7909;c l&#7909;c</label>
+      <label class="chk"><input type="checkbox" id="optNoToc"> <span data-i18n="opt.noToc">Tắt mục lục</span></label>
 
-      <div class="sec">Cache</div>
-      <label class="chk"><input type="radio" name="cacheMode" id="cmBeside" value="beside"> C&#7841;nh file g&#7889;c</label>
-      <label class="chk"><input type="radio" name="cacheMode" id="cmTool" value="tool"> Trong th&#432; m&#7909;c tool</label>
-      <label class="chk"><input type="checkbox" id="optWatch"> T&#7921; c&#7853;p nh&#7853;t khi file &dstrok;&#7893;i</label>
+      <div class="sec" data-i18n="sec.cache">Cache</div>
+      <label class="chk"><input type="radio" name="cacheMode" id="cmBeside" value="beside"> <span data-i18n="opt.cacheBeside">Cạnh file gốc</span></label>
+      <label class="chk"><input type="radio" name="cacheMode" id="cmTool" value="tool"> <span data-i18n="opt.cacheTool">Trong thư mục tool</span></label>
+      <label class="chk"><input type="checkbox" id="optWatch"> <span data-i18n="opt.watch">Tự cập nhật khi file đổi</span></label>
 
-      <div class="sec">Xu&#7845;t</div>
-      <button id="btnExport" class="primary">Xu&#7845;t HTML&hellip;</button>
-      <button id="btnExportAll" class="soft">Xu&#7845;t t&#7845;t c&#7843;&hellip;</button>
-      <button id="btnReveal" class="soft">M&#7903; th&#432; m&#7909;c file g&#7889;c</button>
-      <button id="btnOpenFolder" class="ghost">M&#7903; th&#432; m&#7909;c xu&#7845;t</button>
+      <div class="sec" data-i18n="sec.export">Xuất</div>
+      <button id="btnExport" class="primary" data-i18n="btn.export">Xuất HTML…</button>
+      <button id="btnExportAll" class="soft" data-i18n="btn.exportAll">Xuất tất cả…</button>
+      <button id="btnReveal" class="soft" data-i18n="btn.reveal">Mở thư mục file gốc</button>
+      <button id="btnOpenFolder" class="ghost" data-i18n="btn.openFolder">Mở thư mục xuất</button>
+    </div>
+    <div class="col-body" id="mmPanel" hidden>
+      <div class="mm-doc" id="mmDocName">Chọn một tài liệu bên trái để xem phát hiện</div>
+      <div class="mm-doc-sub" id="mmDocSub"></div>
+      <div id="mmFindings"></div>
+      <div id="mmInfoBox" hidden>
+        <button class="ghost mm-info-btn" id="btnMMInfo"></button>
+        <div id="mmInfo" hidden></div>
+      </div>
     </div>
     <div class="col-head log-head" id="logHead">
-      <span class="ttl">Nh&#7853;t k&yacute;</span>
+      <span class="ttl" data-i18n="log.title">Nhật ký</span>
       <span class="spacer"></span>
-      <span class="mut" id="logToggle">thu g&#7885;n</span>
+      <span class="mut" id="logToggle">thu gọn</span>
     </div>
     <pre class="log" id="log"></pre>
   </section>

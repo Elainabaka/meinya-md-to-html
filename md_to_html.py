@@ -30,13 +30,80 @@ def _slug(text: str) -> str:
     return re.sub(r"[\s_]+", "-", s).strip("-") or "section"
 
 
-_CALLOUT_META = {
-    "note": ("Note", "ℹ"),
-    "tip": ("Mẹo", "✓"),
-    "important": ("Quan trọng", "❗"),
-    "warning": ("Cảnh báo", "⚠"),
-    "caution": ("Nguy hiểm", "⛔"),
+# Nhan giao dien trang. vi la ban goc; lang bat dau bang "en" -> tieng Anh;
+# moi lang khac (xx, rong) -> tieng Viet nhu cu. Them ngon ngu = them mot dict.
+_LABELS = {
+    "vi": {
+        "crumb": "Tài liệu /",
+        "theme_light": "☀ Sáng",
+        "theme_dark": "☾ Tối",
+        "toc": "Mục lục",
+        "toc_filter": "Lọc mục...",
+        "source": "Nguồn:",
+        "made_by": "Tạo bởi",
+        "footer": "Trang tài liệu offline — mở bằng trình duyệt, không cần mạng.",
+        "totop": "Về đầu trang",
+        "copy": "Copy",
+        "copied": "Đã copy",
+        "wrap": "Wrap",
+        "unwrap": "Unwrap",
+        "wrap_title": "Xuống dòng code dài",
+        "copy_link": "Copy link",
+        "eyebrow": "Tài liệu kỹ thuật",
+        "words_one": "từ",
+        "words_many": "từ",
+        "read": "phút đọc",
+        "tables_one": "bảng",
+        "tables_many": "bảng",
+        "codes_one": "code",
+        "codes_many": "code",
+        "callout_note": "Note",
+        "callout_tip": "Mẹo",
+        "callout_important": "Quan trọng",
+        "callout_warning": "Cảnh báo",
+        "callout_caution": "Nguy hiểm",
+    },
+    "en": {
+        "crumb": "Document /",
+        "theme_light": "☀ Light",
+        "theme_dark": "☾ Dark",
+        "toc": "Contents",
+        "toc_filter": "Filter sections...",
+        "source": "Source:",
+        "made_by": "Made by",
+        "footer": "Offline document page: open in any browser, no network needed.",
+        "totop": "Back to top",
+        "copy": "Copy",
+        "copied": "Copied",
+        "wrap": "Wrap",
+        "unwrap": "Unwrap",
+        "wrap_title": "Wrap long lines",
+        "copy_link": "Copy link",
+        "eyebrow": "Technical document",
+        "words_one": "word",
+        "words_many": "words",
+        "read": "min read",
+        "tables_one": "table",
+        "tables_many": "tables",
+        "codes_one": "code block",
+        "codes_many": "code blocks",
+        "callout_note": "Note",
+        "callout_tip": "Tip",
+        "callout_important": "Important",
+        "callout_warning": "Warning",
+        "callout_caution": "Caution",
+    },
 }
+_CALLOUT_ICON = {"note": "ℹ", "tip": "✓", "important": "❗", "warning": "⚠", "caution": "⛔"}
+_VI_EYEBROW = _LABELS["vi"]["eyebrow"]
+
+
+def _is_en(lang: str) -> bool:
+    return str(lang or "").strip().lower().startswith("en")
+
+
+def _labels(lang: str) -> dict:
+    return _LABELS["en"] if _is_en(lang) else _LABELS["vi"]
 
 _CALLOUT_RE = re.compile(r"^\[!(note|tip|important|warning|caution)\]\s*(.*)$", re.IGNORECASE)
 
@@ -63,9 +130,10 @@ def _is_delim_row(cells: list[str]) -> bool:
 class Parser:
     """Markdown -> HTML fragment (body) + TOC entries. Giu thu tu, don gian."""
 
-    def __init__(self) -> None:
+    def __init__(self, lang: str = "vi") -> None:
         self.toc: list[tuple[int, str, str]] = []  # (level, id, text-html)
         self._used_ids: dict[str, int] = {}
+        self.L = _labels(lang)
 
     def _uid(self, base: str) -> str:
         n = self._used_ids.get(base, 0)
@@ -157,12 +225,13 @@ class Parser:
                 i += 1  # dong ```
                 code = html.escape("\n".join(buf), quote=False)
                 label = html.escape(lang) if lang else "text"
+                L = self.L
                 out.append(
                     '<figure class="code"><figcaption>'
                     f'<span class="dot"></span><span class="dot"></span>'
                     f'<span class="lang">{label}</span>'
-                    '<button class="copy" type="button">Copy</button>'
-                    '<button class="wrap" type="button" title="Xuống dòng code dài">Wrap</button>'
+                    f'<button class="copy" type="button">{L["copy"]}</button>'
+                    f'<button class="wrap" type="button" title="{L["wrap_title"]}">{L["wrap"]}</button>'
                     f"</figcaption><pre><code>{code}</code></pre></figure>"
                 )
                 continue
@@ -196,7 +265,7 @@ class Parser:
                 if m_call:
                     kind = m_call.group(1).lower()
                     rest_title = m_call.group(2).strip()
-                    label, icon = _CALLOUT_META[kind]
+                    label, icon = self.L["callout_" + kind], _CALLOUT_ICON[kind]
                     # Phan than: cac dong sau dong marker
                     idx = buf.index(first)
                     body_lines = [b for b in buf[idx + 1:] if b]
@@ -438,21 +507,21 @@ footer{max-width:1120px;margin:0 auto;padding:0 24px 48px;color:var(--faint);fon
 @media print{.topbar,.toc,.theme-btn,.totop,.progress,.copy,.wrap,.toc-filter{display:none!important}.layout{display:block;padding:0}article{border:0;box-shadow:none}body{background:#fff}table,figure.code,figure.fig,.callout,.math{page-break-inside:avoid}article h2{page-break-after:avoid}}
 """
 
-JS = r"""
+_JS_TEMPLATE = r"""
 (function(){var r=document.documentElement;var saved=null;try{saved=localStorage.getItem('md-theme')}catch(e){}
 function theme(){return saved||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')}
-function apply(t){r.setAttribute('data-theme',t);var b=document.getElementById('themeBtn');if(b)b.textContent=t==='dark'?'☾ Tối':'☀ Sáng'}
+function apply(t){r.setAttribute('data-theme',t);var b=document.getElementById('themeBtn');if(b)b.textContent=t==='dark'?'@@theme_dark@@':'@@theme_light@@'}
 apply(theme());var btn=document.getElementById('themeBtn');if(btn)btn.addEventListener('click',function(){var t=r.getAttribute('data-theme')==='dark'?'light':'dark';saved=t;try{localStorage.setItem('md-theme',t)}catch(e){}apply(t)});
-function copyText(t,ok){function done(btn){if(!btn)return;var o=btn.textContent;btn.textContent='Đã copy';setTimeout(function(){btn.textContent=o},1400)}
+function copyText(t,ok){function done(btn){if(!btn)return;var o=btn.textContent;btn.textContent='@@copied@@';setTimeout(function(){btn.textContent=o},1400)}
 if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){done(document.activeElement)}).catch(function(){fallback()})}else{fallback()}
 function fallback(){var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done(document.activeElement)}catch(e){}document.body.removeChild(ta)}}
-document.querySelectorAll('figure.code').forEach(function(f){var b=f.querySelector('.copy');if(b)b.addEventListener('click',function(){copyText(f.querySelector('code').innerText);var o='Copy';b.textContent='Đã copy';setTimeout(function(){b.textContent=o},1400)});
-var w=f.querySelector('.wrap');if(w)w.addEventListener('click',function(){f.classList.toggle('wrap');w.textContent=f.classList.contains('wrap')?'Unwrap':'Wrap'})});
+document.querySelectorAll('figure.code').forEach(function(f){var b=f.querySelector('.copy');if(b)b.addEventListener('click',function(){copyText(f.querySelector('code').innerText);var o='@@copy@@';b.textContent='@@copied@@';setTimeout(function(){b.textContent=o},1400)});
+var w=f.querySelector('.wrap');if(w)w.addEventListener('click',function(){f.classList.toggle('wrap');w.textContent=f.classList.contains('wrap')?'@@unwrap@@':'@@wrap@@'})});
 var bar=document.getElementById('bar');addEventListener('scroll',function(){var h=document.documentElement;var p=h.scrollTop/Math.max(1,h.scrollHeight-h.clientHeight);if(bar)bar.style.width=(p*100)+'%';var tt=document.getElementById('totop');if(tt)tt.classList.toggle('show',h.scrollTop>800)},{passive:true});
 var tt=document.getElementById('totop');if(tt)tt.addEventListener('click',function(){scrollTo({top:0,behavior:'smooth'})});
 var links=Array.prototype.slice.call(document.querySelectorAll('.toc a'));var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'))}).filter(Boolean);
 if('IntersectionObserver' in window&&secs.length){var obs=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){links.forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id)})}})},{rootMargin:'-20% 0px -70% 0px'});secs.forEach(function(s){obs.observe(s)})}
-document.querySelectorAll('article h2[id],article h3[id]').forEach(function(h){var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.title='Copy link';a.textContent='¶';a.addEventListener('click',function(ev){var url=location.href.split('#')[0]+'#'+h.id;if(navigator.clipboard&&navigator.clipboard.writeText){ev.preventDefault();navigator.clipboard.writeText(url);history.replaceState(null,'','#'+h.id);a.textContent='✓';setTimeout(function(){a.textContent='¶'},1200)}});h.appendChild(a)});
+document.querySelectorAll('article h2[id],article h3[id]').forEach(function(h){var a=document.createElement('a');a.className='anchor';a.href='#'+h.id;a.title='@@copy_link@@';a.textContent='¶';a.addEventListener('click',function(ev){var url=location.href.split('#')[0]+'#'+h.id;if(navigator.clipboard&&navigator.clipboard.writeText){ev.preventDefault();navigator.clipboard.writeText(url);history.replaceState(null,'','#'+h.id);a.textContent='✓';setTimeout(function(){a.textContent='¶'},1200)}});h.appendChild(a)});
 var tf=document.getElementById('tocFilter');if(tf){tf.addEventListener('input',function(){var q=tf.value.toLowerCase();document.querySelectorAll('.toc a').forEach(function(a){a.classList.toggle('hide',q&&a.textContent.toLowerCase().indexOf(q)<0)})})}
 })();
 // Host bridge: chi hoat dong khi trang duoc nhung trong iframe preview cua app
@@ -465,6 +534,19 @@ var t=null;addEventListener('scroll',function(){if(t)return;t=setTimeout(functio
 })();
 """
 
+_JS_TOKENS = ("theme_dark", "theme_light", "copied", "copy", "unwrap", "wrap", "copy_link")
+
+
+def _js(L: dict) -> str:
+    """JS cua trang: thay tung @@ma@@ bang nhan cua ngon ngu (vi cho ra y nguyen ban cu)."""
+    out = _JS_TEMPLATE
+    for k in _JS_TOKENS:
+        out = out.replace(f"@@{k}@@", L[k])
+    return out
+
+
+JS = _js(_LABELS["vi"])
+
 PAGE = """<!DOCTYPE html>
 <html lang="{lang}">
 <head>
@@ -476,11 +558,11 @@ PAGE = """<!DOCTYPE html>
 <body>
 <div class="topbar"><div class="topbar-in">
 <span class="crumbs">{crumb}</span>
-<button class="theme-btn" id="themeBtn" type="button">☀ Sáng</button>
+<button class="theme-btn" id="themeBtn" type="button">{theme_light}</button>
 </div><div class="progress" id="bar"></div></div>
 <div class="layout">
-<nav class="toc" aria-label="Mục lục"><h2>Mục lục</h2>
-<input class="toc-filter" id="tocFilter" type="search" placeholder="Lọc mục..." autocomplete="off">
+<nav class="toc" aria-label="{toc_title}"><h2>{toc_title}</h2>
+<input class="toc-filter" id="tocFilter" type="search" placeholder="{toc_filter}" autocomplete="off">
 <div class="toc-list" id="tocList">
 {toc}
 </div>
@@ -490,11 +572,11 @@ PAGE = """<!DOCTYPE html>
 <h1 class="doc-title">{title}</h1>
 {sub}
 {body}
-<p class="doc-meta">Nguồn: <code>{source}</code> · Tạo bởi <code>md_to_html.py</code> · {date} · {stats}</p>
+<p class="doc-meta">{source_label} <code>{source}</code> · {made_by} <code>md_to_html.py</code> · {date} · {stats}</p>
 </article></main>
 </div>
-<footer>Trang tài liệu offline — mở bằng trình duyệt, không cần mạng.</footer>
-<button class="totop" id="totop" type="button" aria-label="Về đầu trang">↑</button>
+<footer>{footer}</footer>
+<button class="totop" id="totop" type="button" aria-label="{totop}">↑</button>
 <script>{js}</script>
 </body>
 </html>
@@ -508,23 +590,31 @@ def atomic_write_text(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def doc_stats(md_text: str, body_html: str) -> str:
+def _count(L: dict, key: str, n: int) -> str:
+    return f"{n} {L[key + ('_one' if n == 1 else '_many')]}"
+
+
+def doc_stats(md_text: str, body_html: str, lang: str = "vi") -> str:
+    L = _labels(lang)
     words = len(re.findall(r"\w+", md_text, flags=re.UNICODE))
     mins = max(1, (words + 199) // 200)
-    parts = [f"{words} từ", f"~{mins} phút đọc"]
+    parts = [_count(L, "words", words), f"~{mins} {L['read']}"]
     tables = body_html.count("<table>")
     codes = body_html.count('<figure class="code">')
     if tables:
-        parts.append(f"{tables} bảng")
+        parts.append(_count(L, "tables", tables))
     if codes:
-        parts.append(f"{codes} code")
+        parts.append(_count(L, "codes", codes))
     return " · ".join(parts)
 
 
 def convert(md_text: str, source_name: str, doc_title: str = "",
             eyebrow: str = "Tài liệu kỹ thuật", lang: str = "vi",
             with_toc: bool = True, date_str: str = "") -> str:
-    p = Parser()
+    L = _labels(lang)
+    if _is_en(lang) and eyebrow in ("", _VI_EYEBROW):
+        eyebrow = L["eyebrow"]
+    p = Parser(lang)
     body = p.parse(md_text)
     # Tieu de: # dau tien -> title; ## ke tiep (neu sat sau) -> subtitle.
     title = doc_title
@@ -565,20 +655,27 @@ def convert(md_text: str, source_name: str, doc_title: str = "",
             )
         toc_html = "\n".join(parts)
     date = date_str.strip() or datetime.now().strftime("%d/%m/%Y")
-    stats = doc_stats(md_text, body)
+    stats = doc_stats(md_text, body, lang)
     return PAGE.format(
         lang=lang,
         title=html.escape(title, quote=False),
         css=CSS,
-        js=JS,
-        crumb=f"Tài liệu / <b>{html.escape(title, quote=False)}</b>",
+        js=_js(L),
+        crumb=f"{L['crumb']} <b>{html.escape(title, quote=False)}</b>",
         eyebrow=html.escape(eyebrow),
         sub=sub,
         body=body,
         source=html.escape(source_name, quote=False),
+        source_label=L["source"],
+        made_by=L["made_by"],
         date=date,
         stats=stats,
         toc=toc_html,
+        toc_title=L["toc"],
+        toc_filter=L["toc_filter"],
+        theme_light=L["theme_light"],
+        footer=L["footer"],
+        totop=L["totop"],
     )
 
 

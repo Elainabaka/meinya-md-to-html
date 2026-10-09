@@ -27,13 +27,20 @@ HISTORY_DIR = re.compile(
     r"(?:^|/)(?:archive|archived|_archive|attic|old|legacy|deprecated|history|luu[-_ ]?tru|_cu[^/]*|"
     r"adr|adrs|decisions|decision-records|research|pinned|vendor|third[-_]?party|jobs|runs|"
     r"experiments?|thi[-_]?nghiem|fixtures?|testdata|templates?|scaffold|boilerplate|prompts?|\d{4}-\d{2}-\d{2}[^/]*|"
-    r"(?:tests?|__tests__|testsuite)/[^/]+/[^/]+|versioned_docs)/", re.I)     # deep in a test folder: a test's input; Docusaurus snapshots
+    r"done|completed|complete|implemented|shipped|superseded|obsolete|finished|"
+    r"(?:tests?|__tests__|testsuite)/[^/]+/[^/]+|versioned_docs[^/]*)/", re.I)     # deep in a test folder: a test's input; Docusaurus snapshots
 VERSION_DIR = re.compile(r"^(?:v(\d+(?:\.\d+)*)|version[-_]?(\d+(?:\.\d+)*)(?:\.x)?|(\d+\.(?:\d+|x)(?:\.\d+)*))$", re.I)
 POST_DIR = re.compile(r"(?:^|/)(?:blogs?|news|posts|_posts|articles|announcements?)/", re.I)
 PLAN_NAME = re.compile(
     r"(?:^|[_\-. ])(?:plan|plans|proposal|rfc|draft|todo|ideas?|spike|brainstorm|wip|"
     r"ke[-_ ]?hoach|de[-_ ]?xuat|y[-_ ]?tuong|phieu|brief)(?:[_\-. \d]|$)", re.I)
-PLAN_PATH = re.compile(r"(?:^|/)(?:tasks?|tickets?|plans?|proposals?|rfcs?|drafts?|ideas?|y[-_]?tuong|backlog)/|(?:^|/)T\d+[a-z]?[-_][^/]*$", re.I)
+PLAN_PATH = re.compile(r"(?:^|/)(?:tasks?|tickets?|plans?|proposals?|rfcs?|drafts?|ideas?|y[-_]?tuong|backlog|todos?|wip|in[-_]?progress|planned|upcoming)/|(?:^|/)T\d+[a-z]?[-_][^/]*$", re.I)
+DATED_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}")
+STATUS_LINE = re.compile(
+    r"^\s{0,3}(?:\*\*|__)?status(?:\*\*|__)?\s*[:—–-]\s*(?:\*\*|__)?\s*[\"']?"
+    r"(done|implemented|completed|shipped|superseded|obsolete|deprecated|archived|rejected|withdrawn|accepted|"
+    r"draft|proposed|planned|in\s+progress|wip|approved)\b", re.I)
+PLAN_STATUS = {"draft", "proposed", "planned", "in progress", "wip", "approved"}
 
 
 def is_post(path: str) -> bool:
@@ -68,7 +75,35 @@ def old_versions(paths) -> set:
     return out
 
 
-def classify(path: str, cfg: dict | None = None, mark: str = "", old_version: bool = False) -> str:
+def _status_kind(lines: list[str]) -> str:
+    limit = 20
+    if lines and lines[0].lstrip("\ufeff").strip() == "---":
+        end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() in ("---", "...")), 0)
+        limit = max(limit, end + 1)
+    fence = ""
+    comment = False
+    for line in lines[:limit]:
+        if comment or "<!--" in line:
+            comment = "-->" not in line
+            continue
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
+        if marker:
+            if not fence:
+                fence = marker.group(1)
+            elif marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence):
+                fence = ""
+            continue
+        if fence:
+            continue
+        match = STATUS_LINE.match(line)
+        if match:
+            status = " ".join(match.group(1).lower().split())
+            return "plan" if status in PLAN_STATUS else "history"
+    return ""
+
+
+def classify(path: str, cfg: dict | None = None, mark: str = "", old_version: bool = False,
+             lines: list[str] | None = None) -> str:
     if mark in ("live", "plan", "history"):
         return mark
     cfg = cfg or {}
@@ -78,11 +113,18 @@ def classify(path: str, cfg: dict | None = None, mark: str = "", old_version: bo
         return "history"
     if cfg.get("plans") and match_any(path, cfg["plans"]):
         return "plan"
+    status = _status_kind(lines or [])
+    if status:
+        return status
     if old_version:
         return "history"
     name = path.rsplit("/", 1)[-1]
     stem = name.rsplit(".", 1)[0]
-    if HISTORY_DIR.search(path) or HISTORY_NAME.search(stem):
+    if HISTORY_DIR.search(path):
+        return "history"
+    if DATED_NAME.match(name) and not is_post(path):
+        return "plan"
+    if HISTORY_NAME.search(stem):
         return "history"
     if PLAN_NAME.search(stem) or PLAN_PATH.search(path):
         return "plan"

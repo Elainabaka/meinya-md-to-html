@@ -389,6 +389,16 @@ class Extractor:
         return out
 
     def _command(self, doc: Doc, line: int, col: int, t: str, ctx: str, cwd) -> list:
+        parts = split_compound(t)
+        if len(parts) > 1:
+            claims = []
+            for part in parts:
+                found = self._command(doc, line, col, part, ctx, cwd)
+                claims.extend(found)
+                for claim in found:
+                    if claim.extra.get("cd"):
+                        cwd = claim.target
+            return claims
         argv = split_cmd(PROMPT.sub("", t))
         out: list[Claim] = []
         while argv and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]) or argv[0] in ("sudo", "time", "&", "call", "exec")):

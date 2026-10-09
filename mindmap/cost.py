@@ -11,7 +11,7 @@ import json
 import posixpath
 from pathlib import Path
 
-AGENT_NAMES = {"claude.md", "agents.md", "gemini.md", "claude.local.md"}
+AGENT_NAMES = {"claude.md", "agents.md", "agents.override.md", "gemini.md", "claude.local.md"}
 AGENT_PATHS = {".github/copilot-instructions.md", ".cursorrules", ".windsurfrules"}
 
 

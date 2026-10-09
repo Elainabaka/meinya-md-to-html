@@ -1,8 +1,31 @@
 from __future__ import annotations
 
+import json
 import sys
 import traceback
 from pathlib import Path
+
+
+STATE_NAME = ".md_to_html_state.json"  # = api.STATE_NAME (khong import api: dang o duong loi)
+
+
+def saved_ui_lang(root: Path) -> str:
+    """Ngon ngu giao dien da luu (khoa ui_lang); khong doc duoc thi tra vi."""
+    try:
+        data = json.loads((root / STATE_NAME).read_text("utf-8"))
+        lang = str(data.get("ui_lang", "")).strip().lower()
+    except Exception:
+        lang = ""
+    return "en" if lang == "en" else "vi"
+
+
+def fatal_message(lang: str, exc) -> tuple[str, str]:
+    """(tieu de, noi dung) cua hop thoai loi khi khong khoi dong duoc."""
+    if str(lang or "").strip().lower().startswith("en"):
+        return ("MD to HTML · Error",
+                f"MD to HTML could not start:\n\n{exc}\n\nDetails: md_to_html_error.log")
+    return ("MD to HTML · Error",
+            f"Meinya MD to HTML không thể khởi động:\n\n{exc}\n\nChi tiết: md_to_html_error.log")
 
 
 def _fatal(root: Path, exc: Exception):
@@ -13,10 +36,8 @@ def _fatal(root: Path, exc: Exception):
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                0,
-                f"Meinya MD to HTML không thể khởi động:\n\n{exc}\n\nChi tiết: md_to_html_error.log",
-                "MD to HTML · Error", 0x10)
+            title, text = fatal_message(saved_ui_lang(root), exc)
+            ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)
             return
         except Exception:
             pass

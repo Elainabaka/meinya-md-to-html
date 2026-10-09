@@ -68,6 +68,11 @@ def defines(text: str, name: str, rel: str = "x.py") -> bool:
     if len(text) > 600:         # a minified bundle or a data line: nobody defines a name there by hand
         return False
     esc = re.escape(name)
+    if re.search(r"^\s+(?:let|var|val)\s+(?:mut\s+)?%s\b" % esc, text) or (
+        os.path.splitext(rel)[1].lower() == ".rs"
+        and re.search(r"\blet\s+(?:mut\s+)?%s\b" % esc, text)
+    ):
+        return False
     if any(re.search(p % ((esc,) * p.count("%s")), text) for p in DEFINES):
         return True
     return os.path.splitext(rel)[1].lower() in SHELL_EXT and re.search(SHELL_FUNCTION % esc, text) is not None
@@ -353,7 +358,8 @@ class Git:
                 args += ["-e", n]
             args += [rev, "--"]
             if self.sub:
-                args.append(self.sub)
+                args.append(":(literal)" + self.sub)
+            args.extend((":(glob,exclude,icase)**/*secret*", ":(glob,exclude,icase)**/*secret*/**"))
             out = self._git(args, timeout=120, ok_codes=(0, 1))
             if not out:
                 continue
@@ -391,6 +397,7 @@ class Git:
                 args += ["-e", n]
             args += ["--", self.sub or ".", ":(exclude)*.md", ":(exclude)*.markdown", ":(exclude)*.mdx",
                      ":(exclude)*.html", ":(exclude)*.htm"]
+            args.extend((":(glob,exclude,icase)**/*secret*", ":(glob,exclude,icase)**/*secret*/**"))
             out = self._git(args, timeout=60, ok_codes=(0, 1))
             hits = None if out is None else set(out.decode("utf-8", "replace").split())
             for n in chunk:

@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from md_to_html import _convert_one, convert
+from md_to_html import _convert_one, _is_en, convert
 
 
 def suggest_output(input_path: str) -> str:
@@ -21,19 +21,21 @@ def suggest_output(input_path: str) -> str:
     return str(p.with_suffix(".html"))
 
 
-def preview_stats(input_path: str) -> str:
-    """Thong ke nhanh de user quyet dinh truoc khi convert (khong dung Parser)."""
+def preview_stats(input_path: str, lang: str = "vi") -> str:
+    """Thong ke nhanh de user quyet dinh truoc khi convert (khong dung Parser).
+    lang = ngon ngu giao dien (vi/en), khong phai ngon ngu tai lieu."""
+    en = _is_en(lang)
     p = Path(input_path or "")
     if not p.is_file():
-        return "Chua chon file."
+        return "No file selected." if en else "Chua chon file."
     try:
         text = p.read_text(encoding="utf-8-sig")
     except OSError as e:
-        return f"Khong doc duoc: {e}"
-    return preview_stats_of_text(text, p.name)
+        return f"Cannot read: {e}" if en else f"Khong doc duoc: {e}"
+    return preview_stats_of_text(text, p.name, lang)
 
 
-def preview_stats_of_text(text: str, name: str = "") -> str:
+def preview_stats_of_text(text: str, name: str = "", lang: str = "vi") -> str:
     lines = text.split("\n")
     h2 = sum(1 for ln in lines if re.match(r"^##\s+\S", ln.strip()))
     h3 = sum(1 for ln in lines if re.match(r"^###\s+\S", ln.strip()))
@@ -42,6 +44,11 @@ def preview_stats_of_text(text: str, name: str = "") -> str:
     words = len(re.findall(r"\w+", text, flags=re.UNICODE))
     mins = max(1, (words + 199) // 200)
     prefix = f"{name}: " if name else ""
+    if _is_en(lang):
+        return (
+            f"{prefix}{len(lines)} lines · {words} words · ~{mins} min · "
+            f"{h2} h2 · {h3} h3 · {tables} table lines · {code} code"
+        )
     return (
         f"{prefix}{len(lines)} dòng · {words} từ · ~{mins} phút · "
         f"{h2} h2 · {h3} h3 · {tables} dòng bảng · {code} code"

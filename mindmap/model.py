@@ -61,8 +61,8 @@ MESSAGES = {
         "`{claim}` vừa bị xóa trong cây làm việc (HEAD vẫn có)",
     ),
     "path-missing": (
-        "`{claim}` does not exist (and did not when this line was written)",
-        "`{claim}` không tồn tại (lúc viết dòng này cũng chưa có)",
+        "`{claim}` does not exist in the repository",
+        "`{claim}` không tồn tại trong repo",
     ),
     "link-broken": (
         "link target `{claim}` does not exist",

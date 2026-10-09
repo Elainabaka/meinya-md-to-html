@@ -6,19 +6,19 @@
 
 README, `AGENTS.md`, `CLAUDE.md`, bài hướng dẫn: file nào cũng nhắc tên file, lệnh, tùy chọn, hàm và các quyết định. Code đổi tiếp, còn tài liệu vẫn nói điều cũ. Người đọc mất một giờ vì nó. Agent viết code thì đọc dòng cũ đó vào đầu mỗi phiên và làm theo.
 
-Mind Map đọc Markdown của bạn, nhặt ra mọi điều mà máy kiểm được, rồi đối chiếu với thư mục hiện tại và lịch sử git. Nó không dùng model, không dùng mạng, và chỉ cần Python với git.
+Mind Map đọc Markdown của bạn, nhặt ra mọi điều mà máy kiểm được, rồi đối chiếu với thư mục hiện tại và lịch sử git. Nó không dùng model, không dùng mạng, và chỉ cần Python; có git thì mỗi phát hiện kèm thêm bằng chứng từ lịch sử.
 
 ![Báo cáo HTML của một repo mẫu nhỏ](docs/mind-map-report.png)
 
 ## Dùng thử
 
 ```bash
-pip install git+https://github.com/Elainabaka/meinya-mind-map
+uv tool install git+https://github.com/Elainabaka/meinya-mind-map
 cd repo-cua-ban
 mindmap check . --lang vi
 ```
 
-Không muốn cài: tải repo này về rồi chạy `python -I run_mindmap.py check /duong/dan/toi/repo --lang vi`.
+`uv tool` (hoặc `pipx install git+…`) đặt lệnh `mindmap` vào PATH, thứ mà hook và phần cài cho agent bên dưới cần. `pip install git+…` cũng được, nhưng lệnh chỉ có trong môi trường bạn cài vào. Không muốn cài: tải repo này về rồi chạy `python -I run_mindmap.py check /duong/dan/toi/repo --lang vi`.
 
 Đây là kết quả với repo mẫu trong ảnh:
 
@@ -56,7 +56,8 @@ Muốn có trang như trong ảnh, thêm `--format html --out report.html`. Tran
 
 | Tài liệu nói | Đối chiếu với | Mã phát hiện |
 |---|---|---|
-| một đường dẫn, trong dấu backtick hoặc trong link | các file đang có, và mọi lần dời, xóa trong lịch sử | `path-moved`, `path-gone`, `path-removed-now`, `path-typo`, `link-broken`, `link-case` |
+| một đường dẫn, trong dấu backtick hoặc trong link | các file đang có, và mọi lần dời, xóa trong lịch sử | `path-moved`, `path-gone`, `path-removed-now`, `path-typo`, `path-missing`, `link-broken`, `link-case` |
+| một đường dẫn không có trong cây và chưa từng có (agent hay bịa kiểu này) | thư mục đầu của đường dẫn phải có thật; bỏ qua file do bước build sinh ra hay git bỏ qua | `path-missing`: cảnh báo trong CLAUDE.md, AGENTS.md và các file cùng loại, ghi nhận ở nơi khác |
 | link tới một mục, `guide.md#install` | các mục và mã neo của trang đó, cùng commit đã bỏ mục | `anchor-missing` |
 | một lệnh trong khối code | file script, script trong `package.json`, target của Makefile | `command-missing`, `npm-script-missing`, `make-target-missing` |
 | tùy chọn hoặc lệnh con của một script trong repo | mã nguồn của script đó, lúc trước và bây giờ | `flag-removed`, `flag-missing`, `subcommand-missing` |
@@ -116,6 +117,26 @@ claude mcp add mind-map -- mindmap mcp
 
 Kèm ba prompt: `fix-drift` (sửa những gì `check` tìm ra), `prose-to-rules` (đề xuất dòng `forbid` cho luật viết bằng lời), `critic` (một bài phản biện thẳng: dự án này có nên tồn tại không).
 
+**Codex, Cursor, VS Code.** Cả ba đều đọc `AGENTS.md`, nên Mind Map kiểm đúng file mà agent của bạn đọc. Thêm cùng MCP server đó:
+
+```bash
+codex mcp add mind-map -- mindmap mcp     # Codex CLI; hoặc [mcp_servers.mind-map] trong ~/.codex/config.toml
+```
+
+Cursor, trong `.cursor/mcp.json` (hoặc `~/.cursor/mcp.json` để dùng cho mọi dự án):
+
+```json
+{"mcpServers": {"mind-map": {"type": "stdio", "command": "mindmap", "args": ["mcp"]}}}
+```
+
+VS Code với Copilot, trong `.vscode/mcp.json` (khóa là `servers`; server chỉ chạy sau khi bạn tin cậy workspace):
+
+```json
+{"servers": {"mind-map": {"type": "stdio", "command": "mindmap", "args": ["mcp"]}}}
+```
+
+Trình soạn thảo không tìm thấy `mindmap` thì ghi đường dẫn đầy đủ tới lệnh đã cài (`mindmap.exe` trên Windows). Tài liệu: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [Cursor MCP](https://cursor.com/docs/context/mcp), [VS Code MCP](https://code.visualstudio.com/docs/copilot/customization/mcp-servers).
+
 **Dùng từ dòng lệnh.** `mindmap impact`, `mindmap cost .`, `mindmap context "việc sắp làm" --budget 400`, `mindmap claims TAILIEU.md`.
 
 ## Trong CI
@@ -160,28 +181,29 @@ Cho code scanning: `mindmap check . --format sarif --out mindmap.sarif`. Các đ
 
 ## Đo thật, không hứa suông
 
-Mười hai repo công khai, mỗi repo ở đúng commit ghi trong bảng, với đủ lịch sử. Số giây là lượt chạy đầu trên một repo, lượt phải lập chỉ mục code: trên Windows 11, rồi Ubuntu trong WSL trên cùng máy bàn. Lượt sau dùng lại chỉ mục khi không file code nào đổi (vite: 4,1 giây trên Windows, 3,4 giây trên Linux).
+Mười hai repo công khai, mỗi repo ở đúng commit ghi trong bảng, với đủ lịch sử. Số giây là lượt chạy đầu trên một repo (đo với bản 0.1.0), lượt phải lập chỉ mục code: trên Windows 11, rồi Ubuntu trong WSL trên cùng máy bàn. Lượt sau dùng lại chỉ mục khi không file code nào đổi (vite: 4,1 giây trên Windows, 3,4 giây trên Linux).
 
 | Repo ở commit | Số commit đã đọc | Tài liệu | Điều kiểm | Lỗi | Cảnh báo | Ghi chú | Giây |
 |---|---|---|---|---|---|---|---|
-| modelcontextprotocol/python-sdk `91941ed` | 1.093 | 771 | 31.926 | 0 | 0 | 442 | 11,6 / 5,6 |
-| gohugoio/hugoDocs `1f72674` | 15.484 | 1.013 | 7.625 | 1 | 0 | 438 | 16,3 / 8,5 |
-| withastro/starlight `531af7d` | 3.805 | 385 | 5.085 | 0 | 0 | 189 | 7,0 / 3,4 |
+| modelcontextprotocol/python-sdk `91941ed` | 1.093 | 771 | 31.926 | 0 | 0 | 482 | 11,6 / 5,6 |
+| gohugoio/hugoDocs `1f72674` | 15.484 | 1.013 | 6.929 | 1 | 1 | 627 | 16,3 / 8,5 |
+| withastro/starlight `531af7d` | 3.805 | 385 | 5.085 | 0 | 0 | 234 | 7,0 / 3,4 |
 | anthropics/anthropic-sdk-python `50b78d1` | 1.516 | 16 | 2.497 | 0 | 0 | 5 | 5,0 / 2,2 |
-| vitejs/vite `b6c20f6` | 9.760 | 84 | 1.713 | 0 | 18 | 53 | 8,8 / 4,7 |
-| fastapi/typer `b15210b` | 1.781 | 80 | 610 | 2 | 0 | 5 | 2,8 / 0,9 |
+| vitejs/vite `b6c20f6` | 9.760 | 84 | 1.706 | 0 | 18 | 53 | 8,8 / 4,7 |
+| fastapi/typer `b15210b` | 1.781 | 80 | 561 | 2 | 0 | 6 | 2,8 / 0,9 |
 | encode/starlette `0a15da3` | 1.764 | 33 | 555 | 0 | 0 | 20 | 1,3 / 0,4 |
 | tj/commander.js `ba6d13d` | 1.517 | 15 | 340 | 0 | 0 | 4 | 1,5 / 0,4 |
-| junegunn/fzf `33a3456` | 3.749 | 9 | 277 | 0 | 0 | 3 | 1,3 / 0,5 |
+| junegunn/fzf `33a3456` | 3.749 | 9 | 278 | 0 | 0 | 3 | 1,3 / 0,5 |
 | encode/httpx `b5addb6` | 1.523 | 29 | 232 | 0 | 3 | 11 | 1,6 / 0,4 |
 | BurntSushi/ripgrep `3fce3b5` | 2.287 | 23 | 167 | 0 | 0 | 12 | 1,2 / 0,5 |
 | expressjs/express `9efc29e` | 6.177 | 4 | 47 | 0 | 0 | 1 | 1,0 / 0,3 |
 
-Tổng cộng 2.462 tài liệu và 51.074 điều kiểm. Có 24 phát hiện ở mức lỗi hoặc cảnh báo, từng cái đã được đọc bằng mắt: 23 cái đúng, 1 cái báo nhầm.
+Tổng cộng 2.462 tài liệu và 50.323 điều kiểm. Có 25 phát hiện ở mức lỗi hoặc cảnh báo, từng cái đã được đọc bằng mắt: 24 cái đúng, 1 cái báo nhầm.
 
 - **vite, 18 cái đúng.** Các bài công bố Vite 5 và Vite 6 link tới những mục của trang hướng dẫn nâng cấp. Các lần viết lại trang đó về sau đã bỏ những mục ấy. Mỗi cảnh báo nêu đúng commit đã bỏ.
 - **httpx, 3 cái đúng.** Link tới những mục đã đổi tên.
 - **typer, 2 cái đúng.** README link tới `tutorial/install.md`, đường dẫn chỉ đúng khi đứng trong `docs/`.
+- **hugoDocs, 1 cái đúng.** `AGENTS.md` bảo agent sửa `layouts/_partials/icons.html`, file không có trong repo. Tìm ra nhờ `path-missing`, luật thêm sau vòng đo đầu.
 - **hugoDocs, 1 cái báo nhầm.** Một trang bảo người đọc đặt file `package.hugo.json` vào module của họ. Repo tài liệu từng có file cùng tên lúc dòng đó được viết, rồi xóa đi. Mọi mẩu bằng chứng đều đúng; chỉ là dòng ấy nói về file của người khác.
 
 Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddleware` thành `CorsMiddleware`) rồi chạy lại. Hai cảnh báo hiện ra, đúng ở hai dòng tài liệu còn dùng tên cũ, kèm commit và gợi ý tên mới.
@@ -189,6 +211,8 @@ Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddlew
 **Những lượt chạy đầu không sạch như vậy.** SDK Python của MCP cho 435 báo nhầm ở lượt đầu. Ba site tài liệu cho 294 phát hiện, chỉ khoảng 20 cái đúng. Năm repo nó chưa từng gặp cho 9 phát hiện: 2 đúng, 6 sai, 1 còn bàn được. Đọc đủ lịch sử của hugoDocs và vite (lần đầu chỉ clone nông) làm thêm 20 phát hiện, cả 20 đều sai. Mỗi báo nhầm đều được truy tới một khe hở chung (tới nay 39 khe: địa chỉ viết cho site đã dựng, nhiều kiểu đặt tên mục của các site, lịch sử có hai dòng commit chạy song song, v.v.) và vá kèm test. Không repo nào có luật riêng. Với một repo có hình dạng khác mười hai repo này, hãy chờ đợi vài báo nhầm; baseline và các chú thích ignore sinh ra cho việc đó.
 
 **Thêm hai mươi repo nó chưa từng gặp (9/10).** Cùng cách làm, chia ba vòng, từng lỗi và cảnh báo đều được đọc bằng mắt. Vòng 1, chín repo (cobra, task, cli/cli, bat, mdBook, execa, black, poetry, vuejs/docs): 81 phát hiện, 2 đúng, 79 nhầm. Vòng 2, sáu repo (prettier, urfave/cli, pipx, yargs, clap, vitepress): 44 phát hiện, 2 đúng, 42 nhầm. Mỗi báo nhầm đó được truy tới một khe chung và vá kèm test (thêm 15 khe); mười hai repo ở trên giữ nguyên mọi phát hiện. Vòng 3, năm repo đo sau khi vá (fd, glow, uvicorn, got, pnpm.io): 48 phát hiện, 14 đúng, 34 nhầm. got cho 9 phát hiện, cả 9 đúng: một link tới trang chưa từng có và 8 link tới mục đã mất. 32 báo nhầm đến từ pnpm.io, một site tài liệu tách khỏi code của công cụ nó viết về, nên các cài đặt và file cấu hình trong trang là của pnpm chứ không phải của site. Mục tiêu cho bản 1.0, không quá một báo nhầm trên mười phát hiện ở lượt đầu, chưa đạt.
+
+**Mười bốn repo nhỏ làm cùng agent viết code (9/10).** Đây là loại repo mà bản 1.0 nhắm tới. Repo nào cũng có CLAUDE.md hoặc AGENTS.md và từ 86 tới 913 commit: 3 repo Python, 4 TypeScript, 3 Go, 4 Rust. Bản 0.1.0 cho 91 lỗi và cảnh báo: 31 đúng, 54 nhầm, 6 còn bàn được. Sáu trong mười bốn repo không có phát hiện nào, và 53 trong 54 báo nhầm đến từ ba repo (bản thiết kế đặt tên theo ngày và đã làm xong, biến cục bộ bị đọc thành định nghĩa, thư mục do `git clone` tạo, link tới trang của chính GitHub). Sau khi vá: 44, trong đó 28 đúng, 10 nhầm, 6 còn bàn được. Ba cái đúng bị hạ xuống ghi nhận trên đường vá: hai tên biến cục bộ, một link trong bản thiết kế có ngày. Số này đo trên chính mười bốn repo đã dùng để tìm khe, nên đẹp hơn thực tế; bước tiếp theo là một bộ nó chưa từng thấy. 10 báo nhầm còn lại cần người đọc hiểu câu: mã của một thiết bị bên ngoài, lệnh thuộc repo khác, câu nói về điều sẽ xảy ra.
 
 **Cùng đầu vào, cùng báo cáo.** Báo cáo JSON của cả mười hai repo giống hệt nhau trên Windows (máy đặt giờ UTC+7) và Linux (UTC), tới từng thông báo và từng ngày, và không đổi theo hash seed của Python.
 
@@ -201,7 +225,7 @@ Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddlew
 - Tên trong code được tìm bằng chỉ mục chữ và mẫu nhận định nghĩa cho hơn ba mươi ngôn ngữ, không phải bằng bộ phân tích riêng cho từng ngôn ngữ. Định nghĩa viết kiểu lạ sẽ bị sót, và khi đó Mind Map im lặng.
 - Bản clone nông có ít lịch sử nên ra ít phát hiện hơn (không bao giờ nhiều hơn). Trong CI hãy lấy đủ lịch sử.
 - Nếu git không trả lời kịp (mỗi lần gọi có giới hạn thời gian thật, hết giờ ba lần trong một lượt thì thôi không hỏi nữa), báo cáo ghi rõ bao nhiêu câu hỏi không được trả lời: một dòng `!`, `stats.git_unanswered` trong JSON, một dòng ở stderr. Báo cáo như vậy có thể thiếu phát hiện: hãy chạy lại. Mã thoát vẫn chỉ theo phát hiện.
-- Trạng thái: 0.1.0, bản alpha. Cần Python 3.11 trở lên và git. Đã thử trên Windows (Python 3.11, 3.12, 3.13): 164 test, trong đó 107 của Mind Map (test của app máy tính được bỏ qua khi không có pywebview). Linux (Python 3.14) mới thử tới bản 0.1.0. Chưa thử: macOS.
+- Trạng thái: 0.1.0, bản alpha. Cần Python 3.11 trở lên; có git thì thêm lịch sử, repo không có git vẫn được soát. Đã thử trên Windows: 437 test trên Python 3.13, trong đó 338 của Mind Map; trên Python 3.11 các test Mind Map cũng xanh (bỏ qua 1 test cần 3.12). Linux (Python 3.14) mới thử tới bản 0.1.0. Chưa thử: macOS.
 
 ## An toàn
 
@@ -225,6 +249,8 @@ Mind Map lớn lên từ một công cụ nhỏ biến file Markdown (`.md`) th�
 
 Chạy lại sau này chỉ cần bấm `run.bat`.
 
+![Tab Mind Map: tài liệu kèm chấm màu, trang, các phát hiện kèm bằng chứng](docs/mind-map-app.vi.png)
+
 ### Tính năng
 
 | Tính năng | Có sẵn | Tải khi cần |
@@ -233,6 +259,7 @@ Chạy lại sau này chỉ cần bấm `run.bat`.
 | App desktop 3 cột: nguồn, xem trước, tùy chọn; tự cập nhật khi file đổi | ✅ | |
 | Mục lục, bảng kiểu GitHub, khối code có nút Copy và Wrap, callout 5 loại, task list, chế độ Sáng/Tối | ✅ | |
 | Xuất một file hoặc tất cả, cache cạnh file gốc hoặc trong thư mục của tool | ✅ | |
+| Tab Mind Map: soát một thư mục, liệt kê tài liệu kèm chấm màu theo phát hiện nặng nhất; chọn một tài liệu để đọc cạnh các phát hiện và bằng chứng, phím ↑/↓ để chuyển; giao diện tiếng Việt hoặc tiếng Anh | ✅ | |
 | Cửa sổ desktop (`pywebview` 6.2.1 và các thư viện nó kéo theo) | | Không có. Lần đầu chạy app, `run.bat` cài sẵn, khoảng 3 MB trên đĩa (đo trong venv mới, không tính pip) |
 
 Không có thành phần nào phải bấm bật để tải thêm. Chạy CLI không cần cài gì thêm ngoài Python.
