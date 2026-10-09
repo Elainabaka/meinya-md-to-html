@@ -895,3 +895,103 @@ def test_a_path_that_ends_an_import_of_a_library_is_the_librarys(repo):
     repo.write("pkg/api.go", 'package pkg\n\nimport "github.com/containers/podman/v5/pkg/bindings"\n')
     repo.write("AGENTS.md", "# Notes\n\nThe API backend talks to the socket with `pkg/bindings`; see `pkg/handlers`.\n").commit()
     assert [(f.rule, f.claim) for f in run(repo).findings] == [("path-missing", "pkg/handlers")]
+
+
+def test_a_tree_drawn_from_the_folder_that_holds_the_repo(repo):
+    # `mytool/` on top is the clone, `mytool/mytool/` the clone and its package: the entries live under the repo
+    repo.write("mytool/cli.py", "x = 1\n").write("mytool/utils/fmt.py", "y = 1\n").write("src/main.py", "z = 1\n")
+    repo.write("README.md", "# x\n")
+    repo.write("AGENTS.md", "# Layout\n\n```\nmytool/\n├── src/\n│   └── main.py\n└── README.md\n```\n\n"
+                            "```\nmytool/mytool/      # package\n├── cli.py          # CLI\n├── table.py        # Tables\n"
+                            "└── utils/\n    └── fmt.py\n\nconfig.toml\n```\n").write("config.toml", "").commit()
+    assert [(f.rule, f.claim) for f in run(repo).findings] == [("path-missing", "table.py")]
+
+
+def test_a_tree_whose_top_folder_was_moved_is_still_stale(repo):
+    repo.write("lib/parser.py", "x = 1\n").write("lib/render.py", "y = 1\n")
+    repo.write("AGENTS.md", "# Layout\n\n```\nlib/\n├── parser.py\n└── render.py\n```\n").commit()
+    repo.mv("lib/parser.py", "parser.py").mv("lib/render.py", "render.py").commit("flatten")
+    assert {f.claim for f in run(repo).findings if f.severity != "info"} == {"parser.py", "render.py"}
+
+
+def test_a_folder_that_gitignore_names_or_holds_is_made_by_a_run(repo):
+    # `tests/output/` only matches a folder; `/src/generated/prisma` makes `src/generated/` a build folder too
+    repo.write("web/tests/helpers/setup.ts", "export const ready = 1\n").write("web/src/app/page.tsx", "x\n")
+    repo.write("web/.gitignore", "tests/output/\n/src/generated/prisma\n")
+    repo.write("web/CLAUDE.md", "# Rules\n\n`tests/output/` is the only test output directory.\n\n"
+                                "Prisma Client goes to `src/generated/`. Fixtures live in `tests/fixtures/`.\n").commit()
+    assert [(f.rule, f.claim) for f in run(repo).findings] == [("path-missing", "tests/fixtures/")]
+
+
+def test_a_file_name_the_code_writes_out_is_not_a_typo(repo):
+    # the playground's React template holds `vite.config.js`; `web/vitest.config.ts` is another file
+    repo.write("web/vitest.config.ts", "export default {}\n").write("web/package.json", '{"name": "web"}\n')
+    repo.write("web/src/play/templates.ts", "export const react = {\n  'vite.config.js': 'export default {}',\n};\n")
+    repo.write("web/src/play/README.md", "# Playground\n\nThe React template has `vite.config.js` and "
+                                         "`vitest.confg.ts`.\n").commit()
+    assert [(f.rule, f.claim) for f in run(repo).findings if f.severity != "info"] == [
+        ("path-typo", "vitest.confg.ts")]
+
+
+def test_a_name_whose_package_left_the_repo_is_a_note(repo):
+    # the SDK moved to its own repo and the app now installs it: `parsePdf` lives on there. The crate deleted
+    # for good (nothing depends on it) and the app's own `exportCsv` are stale
+    repo.write("sdk/typescript/package.json", '{"name": "@acme/sdk"}\n')
+    repo.write("sdk/typescript/src/index.ts", "export function parsePdf(url) { return url }\n")
+    repo.write("core/grpc_types/Cargo.toml", '[package]\nname = "grpc_types"\n')
+    repo.write("core/grpc_types/src/lib.rs", "pub enum MetadataType { Text }\n")
+    repo.write("app/package.json", '{"name": "app"}\n').write("app/src/export.ts", "export function exportCsv() {}\n")
+    repo.write("docs/ARCH.md", "# Flow\n\nThe viewer calls `parsePdf()`, keeps a `MetadataType` and then calls "
+                               "`exportCsv()`.\n").commit()
+    for f in ("sdk/typescript/package.json", "sdk/typescript/src/index.ts", "core/grpc_types/Cargo.toml",
+              "core/grpc_types/src/lib.rs"):
+        repo.git("rm", "-q", f)
+    repo.write("app/package.json", '{"name": "app", "dependencies": {"@acme/sdk": "^1.7.0"}}\n')
+    repo.write("app/src/export.ts", "export function exportRows() {}\n").commit("sdk moves to its own repo")
+    assert {(f.severity, f.claim) for f in run(repo).findings if f.rule == "symbol-gone"} == {
+        ("info", "parsePdf()"), ("warning", "MetadataType"), ("warning", "exportCsv()")}
+
+
+def test_a_record_with_a_date_under_its_title_keeps_the_figures_of_its_day(repo):
+    row = "| the platform layer on the first paint path | +{} ms | rl-ifr minus plain-preact cold |\n"
+    repo.write("bench/VERIFICATION.md", "# Verifying the hypothesis\n\n**Date**: 2026-07-11\n\n" + row.format(40)).commit()
+    repo.write("docs/guide/bench.md", "---\ntitle: Benchmarks\ndate: 2026-07-17\n---\n\n# Benchmarks\n\n"
+                                      + row.format(47)).commit()
+    assert run(repo).findings == []
+    repo.write("docs/guide/old.md", "---\ntitle: Old\ndate: 2026-07-01\n---\n\n# Old numbers\n\n" + row.format(40))
+    repo.commit()
+    found = run(repo).findings
+    assert [f.rule for f in found] == ["copies-diverged"]
+    assert {found[0].path, *(e["path"] for e in found[0].evidence)} == {"docs/guide/old.md", "docs/guide/bench.md"}
+
+
+def test_a_minimum_version_in_a_heading_is_a_requirement(repo):
+    # `(OpenCode v1.2.0+)` is what the tool needs from another program, not the tool's own version
+    repo.write("pyproject.toml", '[project]\nname = "ocmonitor"\nversion = "1.0.4"\n')
+    repo.write("DOCUMENTATION.md", "# Docs\n\n## SQLite Database Not Found (OpenCode v1.2.0+)\n\n"
+                                   "## Works with Python version 3.11.0 or later\n\n## What is new in v1.1.0\n").commit()
+    assert [(f.rule, f.claim) for f in run(repo).findings] == [("version-mismatch", "1.1.0")]
+
+
+def test_a_broken_link_suggests_the_link_as_it_must_be_written(repo):
+    repo.write("LICENSE.md", "# License\n").write("web/LICENSE", "MIT\n")
+    repo.write("web/README.md", "# Web\n\nSee the [license](LICENSE.md).\n").commit()
+    assert [(f.rule, f.suggestion) for f in run(repo).findings] == [("link-broken", "did you mean `../LICENSE.md`?")]
+
+
+def test_a_long_string_in_the_code_is_not_a_path():
+    # base64 or a minified bundle: thousands of `/`, every ending of it once ran a workspace out of memory
+    from mindmap.checks import path_literals
+    assert path_literals("github.com/containers/podman/v5/pkg/bindings")[-2:] == ["v5/pkg/bindings", "pkg/bindings"]
+    assert path_literals("QUJD/" * 20000) == []
+
+
+def test_a_removed_folder_stays_stale_under_a_gitignore_saved_with_crlf(repo):
+    # a blank line of a CRLF .gitignore is a lone `\r`, which git matches against any path asked with a slash
+    repo.write(".gitignore", "vendor/\r\n\r\n/prolific\r\n")
+    repo.write("cmd/requirements/list.go", "package requirements\n").write("cmd/study/list.go", "package study\n")
+    repo.write("DEVELOPMENT.md", "# Layout\n\n```\n.\n├── cmd/\n│   ├── requirements/\n│   └── study/\n```\n").commit()
+    repo.git("rm", "-q", "cmd/requirements/list.go")
+    repo.commit("drop requirements")
+    assert repo.git("check-ignore", "cmd/requirements/").strip() == "cmd/requirements/"      # the trap
+    assert [f.claim for f in run(repo).findings if f.severity != "info"] == ["requirements/"]

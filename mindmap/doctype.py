@@ -42,6 +42,9 @@ STATUS_LINE = re.compile(
     r"(done|implemented|completed|shipped|superseded|obsolete|deprecated|archived|rejected|withdrawn|accepted|"
     r"draft|proposed|planned|in\s+progress|wip|approved)\b", re.I)
 PLAN_STATUS = {"draft", "proposed", "planned", "in progress", "wip", "approved"}
+# `**Date**: 2026-07-11` under the title: a dated record (an experiment, a meeting, a postmortem). Not the `date:`
+# of a site page's front matter, which every page of a Hugo or Jekyll site has
+DATE_LINE = re.compile(r"^\s{0,3}(?:\*\*|__)?date(?:\*\*|__)?\s*[:—–-]\s*(?:\*\*|__)?\s*\d{4}-\d{2}-\d{2}\b", re.I)
 
 
 def is_post(path: str) -> bool:
@@ -78,12 +81,14 @@ def old_versions(paths) -> set:
 
 def _status_kind(lines: list[str]) -> str:
     limit = 20
+    end = 0
     if lines and lines[0].lstrip("\ufeff").strip() == "---":
         end = next((index for index, line in enumerate(lines[1:], 1) if line.strip() in ("---", "...")), 0)
         limit = max(limit, end + 1)
     fence = ""
     comment = False
-    for line in lines[:limit]:
+    dated = False
+    for number, line in enumerate(lines[:limit]):
         if comment or "<!--" in line:
             comment = "-->" not in line
             continue
@@ -100,7 +105,8 @@ def _status_kind(lines: list[str]) -> str:
         if match:
             status = " ".join(match.group(1).lower().split())
             return "plan" if status in PLAN_STATUS else "history"
-    return ""
+        dated = dated or ((not end or number > end) and number < 10 + end and DATE_LINE.match(line) is not None)
+    return "history" if dated else ""
 
 
 def classify(path: str, cfg: dict | None = None, mark: str = "", old_version: bool = False,

@@ -75,6 +75,8 @@ RETIRED_PAGE = re.compile(
 EXAMPLE_DECL = re.compile(
     r"\b(?:const|let|var|val|def|class|function|fn|struct|enum|interface|trait)\s+\*?\s*([A-Za-z_$][\w$]*)"
     r"|\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)")
+PACKAGE_MANIFESTS = ("package.json", "go.mod", "Cargo.toml", "pyproject.toml", "setup.py", "pom.xml", "build.gradle",
+                     "build.gradle.kts", "Package.swift", "pubspec.yaml", "composer.json", "mix.exs")
 PATHISH = re.compile(r"[^\s`'\"()\[\]<>|,;]*/[^\s`'\"()\[\]<>|,;]*")
 LANG_CODES = set("ar bg bn ca cs da de el en es et fa fi fr he hi hr hu hy id it ja ka kk ko lt lv mk ml mn "
                  "mr ms my nb ne nl no pa pl pt ro ru si sk sl sq sr sv sw ta te th tl tr uk ur uz vi zh".split())
@@ -102,6 +104,20 @@ SUBCOMMAND_DEF = re.compile(
 def redact(text: str) -> str:
     """Never echo something that looks like a secret value."""
     return SENSITIVE_VALUE.sub(r"\1***", text)
+
+
+def path_literals(literal: str) -> list:
+    """What a string in the code says about paths: itself, and for an import path its endings (`pkg/bindings` of
+    `"github.com/containers/podman/v5/pkg/bindings"`, a library's package). A long string (base64, a minified
+    bundle, thousands of `/`) is no path: its endings once filled the memory of a whole workspace run."""
+    literal = literal.replace("\\", "/")
+    if len(literal) > 400:
+        return []
+    out = [posixpath.normpath(literal)]
+    if "/" in literal and not any(ch.isspace() for ch in literal):
+        parts = literal.strip("/").split("/")
+        out += ["/".join(parts[k:]) for k in range(1, len(parts) - 1)]
+    return out
 
 
 def _agent_doc(path: str) -> bool:
@@ -173,6 +189,7 @@ class Checker:
         self._retired: dict[str, bool] = {}
         self._ignore_rules: dict[str, list] = {}
         self._path_strings: set[str] | None = None
+        self._manifest_texts: list | None = None
 
     # -- helpers -------------------------------------------------------------
     def git_for(self, rel: str) -> Git | None:
@@ -517,9 +534,53 @@ class Checker:
         return self.findings
 
     # -- paths, links, commands, trees ----------------------------------------
+    def _reroot_trees(self, claims: list) -> None:
+        """A tree drawn from the folder that holds the clone (`mytool/` on top, or `mytool/mytool/` for the
+        clone and its package) names its entries from outside the repo. When most entries are missing under that
+        top, history never had them there, and most exist with the top cut shorter, they are read from there.
+        Entries that history had under the top (a `lib/` since flattened) keep their findings."""
+        groups: dict = defaultdict(list)
+        for c in claims:
+            if c.ctx == "tree" and "top" in c.extra:
+                groups[(c.doc, c.extra["top"])].append(c)
+        for (doc, top), group in groups.items():
+            kids = [c for c in group if c.extra["sub"]]
+
+            def found(base: str) -> int:
+                return sum(1 for c in kids if self._exists(posixpath.join(base, c.extra["sub"]), bool(c.extra.get("dir"))))
+
+            if len(kids) < 2:
+                continue
+            score = found(top)
+            if score * 2 >= len(kids):
+                continue
+            git = self.git_for(doc)
+            hist = git.history() if git else None
+            if hist is not None and hist.ok and any(hist.ever(c.target) for c in kids):
+                continue
+            ddir = posixpath.dirname(doc)
+            segs = (top[len(ddir) + 1:] if ddir and top.startswith(ddir + "/") else top).split("/")
+            best = None
+            for k in range(1, len(segs) + 1):
+                rest = "/".join(segs[k:])
+                for b in dict.fromkeys([posixpath.join(ddir, rest).rstrip("/"), rest]):
+                    n = found(b)
+                    if n > score:
+                        best, score = b, n
+            if best is None or score * 2 < len(kids):
+                continue
+            for c in group:
+                if c.extra["sub"]:
+                    c.target = posixpath.join(best, c.extra["sub"])
+                else:
+                    c.status, c.where = "ok", best or "."       # the clone's own folder
+
     def _paths(self, claims: list) -> None:
+        self._reroot_trees(claims)
         missing: list = []
         for c in claims:
+            if c.ctx == "tree" and c.status == "ok":
+                continue
             if c.kind == "link" and not c.target.startswith("/"):
                 repo = self.inv.repo_of(c.doc)
                 doc = c.doc[len(repo):].lstrip("/") if repo else c.doc
@@ -562,7 +623,7 @@ class Checker:
                 hist = None
             need_blame = set()
             for c in group:
-                if any(p in ignored for p in self._cands(c)):
+                if any(p in ignored for p in self._cands(c)) or self._ignored_folder(c):
                     c.status = "skipped"          # generated / runtime file
                     continue
                 if c.kind != "link" and self.acknowledged(c):
@@ -577,6 +638,13 @@ class Checker:
         for c, git, hist, ever in todo:
             self._missing_path(c, git, hist, ever)
         self._flush_links()
+
+    def _ignored_folder(self, c: Claim) -> bool:
+        """A folder that a folder-only pattern (`tests/output/`) ignores. git cannot tell for a folder that is
+        not there, and asking it with the slash is no cure: on a .gitignore saved with CRLF the `\\r` of a blank
+        line matches every such path."""
+        return bool(c.extra.get("dir") or c.target.endswith("/")) and any(
+            self._ignored_path(p, True) for p in self._cands(c) if not p.startswith(".."))
 
     def _anchor(self, c: Claim, target: str) -> None:
         anchor = c.extra.get("anchor", "")
@@ -796,7 +864,8 @@ class Checker:
             self._never_links[c.doc].append(c)
             return
         near = self._near(c)
-        if near:
+        if near and not (c.kind == "path" and self._in_code_strings(c.target.replace("\\", "/").rstrip("/"))):
+            # `vite.config.js` written as a key of a project template in the code is the file it makes
             self.add("path-typo", WARNING, c, near=near,
                      suggestion=(f"did you mean `{near}`?" if self.lang != "vi" else f"có phải `{near}`?"))
             return
@@ -814,7 +883,7 @@ class Checker:
             return
         c.status = "unverified"
 
-    def _ignored_path(self, path: str, want_dir: bool = False) -> bool:
+    def _ignored_path(self, path: str, want_dir: bool = False, holder: bool = False) -> bool:
         parts = path.split("/")
         rules = []
         for depth in range(len(parts)):
@@ -831,10 +900,15 @@ class Checker:
                 negate = rule.startswith("!")
                 pattern = rule[1:] if negate else rule
                 relative = candidate[len(base) + 1:] if base else candidate
-                if pattern.endswith("/") and depth == len(parts) - 1 and not want_dir:
+                folder = depth < len(parts) - 1 or want_dir
+                if pattern.endswith("/") and not folder:
                     continue
-                if pattern and match_any(relative, [pattern]):
+                if pattern and match_any(relative + "/" if folder else relative, [pattern]):
                     ignored = not negate
+                elif (holder and want_dir and depth == len(parts) - 1 and not negate and "/" in pattern.strip("/")
+                        and pattern.strip("/").lower().startswith(relative.lower() + "/")
+                        and not re.search(r"[*?[]", relative)):
+                    ignored = True      # `/src/generated/prisma` ignored: `src/generated/` is the build's folder
             if ignored:
                 return True
         return False
@@ -882,7 +956,7 @@ class Checker:
         if re.search(r"\b(?:build|compil\w*|generat\w*|render\w*)\b[^\n]*\b(?:moves?|copies?|writes?|outputs?|emits?)\b[^\n]*\bto\s*`?\s*$", before, re.I):
             return False
         candidates = self._cands(c)
-        if any(self._ignored_path(path, bool(c.extra.get("dir") or target.endswith("/")))
+        if any(self._ignored_path(path, bool(c.extra.get("dir") or target.endswith("/")), holder=True)
                for path in candidates if not path.startswith("..")):
             return False
         first = next((part for part in parts if part not in (".", "..")), "")
@@ -892,18 +966,17 @@ class Checker:
         probe = Claim("path", first, first_path, c.doc, c.line, c.col, c.ctx, c.extra.copy())
         if not any(not path.startswith("..") and self._exists(path, True) for path in self._cands(probe)):
             return False
+        return not self._in_code_strings(target)
+
+    def _in_code_strings(self, target: str) -> bool:
+        """The path, or its file name, is written as a string in the code: a file the code makes or names."""
         if self._path_strings is None:
             self._path_strings = set()
             for source in self.index.files:
                 text = self.inv.text(source) or ""
                 for match in re.finditer(r'''(["'`])((?:\\.|(?!\1)[^\\\r\n])*)\1''', text):
-                    literal = match.group(2).replace("\\", "/")
-                    self._path_strings.add(posixpath.normpath(literal))
-                    if "/" in literal and not any(ch.isspace() for ch in literal):
-                        # `pkg/bindings` of `"github.com/containers/podman/v5/pkg/bindings"`: a library's package
-                        parts = literal.strip("/").split("/")
-                        self._path_strings.update("/".join(parts[k:]) for k in range(1, len(parts) - 1))
-        return not ({posixpath.normpath(target), posixpath.basename(target)} & self._path_strings)
+                    self._path_strings.update(path_literals(match.group(2)))
+        return bool({posixpath.normpath(target), posixpath.basename(target)} & self._path_strings)
 
     def _near(self, c: Claim) -> str | None:
         """A sibling whose name differs by a typo (not a variant like `x_v2` next to `x`)."""
@@ -971,7 +1044,8 @@ class Checker:
         hits = [p for p in self.paths.by_name.get(name, ()) if p.casefold() == tf or p.casefold().endswith("/" + tf)]
         if len(hits) != 1:
             return ""
-        return f"did you mean `{hits[0]}`?" if self.lang != "vi" else f"có phải `{hits[0]}`?"
+        link = posixpath.relpath(hits[0], posixpath.dirname(c.doc) or ".")     # as the link must be written
+        return f"did you mean `{link}`?" if self.lang != "vi" else f"có phải `{link}`?"
 
     def _wrong_case(self, c: Claim, p: str) -> bool:
         """A link whose target differs from the real path by letter case only. It opens on Windows and
@@ -1328,7 +1402,43 @@ class Checker:
                 elif now_line:
                     self.add("symbol-removed-now", INFO if used else WARNING, c, evidence=ev, suggestion=sug)
                 else:
-                    self.add("symbol-gone", INFO if used else WARNING, c, evidence=ev, suggestion=sug, when=day(epoch))
+                    # the package that held it left the repo (an SDK moved to its own repo): the name may
+                    # well live on there, as with a flag whose script left
+                    left = self._package_left(git, where[0], rev)
+                    if left:
+                        ev.append({"kind": "git", "path": left, "note": "this package is no longer in the repo"})
+                    self.add("symbol-gone", INFO if used or left else WARNING, c, evidence=ev, suggestion=sug,
+                             when=day(epoch))
+
+    def _package_left(self, git, path: str, rev: str) -> str:
+        """The package folder that held `path`, when the package left the repo and lives on elsewhere: the
+        folder is gone and the repo now depends on the package by the name its manifest had (`@acme/sdk`).
+        A package deleted for good (a crate folded into another) is no such proof."""
+        hist = git.history()
+        if not hist.ok:
+            return ""
+        d = posixpath.dirname(path)
+        while d:
+            for m in PACKAGE_MANIFESTS:
+                manifest = posixpath.join(d, m)
+                if hist.ever(manifest):
+                    if d in self.inv.dir_set:       # still in the repo (files, not an empty folder left on disk)
+                        return ""
+                    name = re.search(r'"name"\s*:\s*"([^"]+)"|^module\s+(\S+)|^name\s*=\s*"([^"]+)"',
+                                     git.show(rev, manifest) or "", re.M)
+                    name = name and next(g for g in name.groups() if g)
+                    return d if name and self._depended_on(name) else ""
+            d = posixpath.dirname(d)
+        return ""
+
+    def _depended_on(self, name: str) -> bool:
+        """Some manifest of the repo names this package (as a dependency: its own manifest is gone)."""
+        if self._manifest_texts is None:
+            self._manifest_texts = [self.inv.text(f) or "" for f in sorted(self.inv.file_set)
+                                    if posixpath.basename(f) in PACKAGE_MANIFESTS
+                                    or re.match(r"requirements.*\.txt$", posixpath.basename(f))]
+        word = re.compile(r"(?<![\w@/.-])" + re.escape(name) + r"(?![\w/.-])")
+        return any(word.search(text) for text in self._manifest_texts)
 
     def _removed_by(self, git, rev: str, path: str, name: str) -> list:
         """One more evidence line: the commit that took `name` out of `path`, when git can tell."""

@@ -78,6 +78,7 @@ SYMBOL = re.compile(
     r"^(?:[A-Za-z_][A-Za-z0-9_]*)(?:(?:\.|::|#)[A-Za-z_][A-Za-z0-9_]*)*(?:\(\s*[^()]*\))?$"
 )
 VERSION_IN_HEADING = re.compile(r"(?:\bv|\bversion\s+|\bphiên bản\s+)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\b", re.I)
+MIN_VERSION = re.compile(r"\s*(?:\+|or (?:later|newer|above|higher)\b|and (?:later|newer|above|up)\b|trở lên\b)", re.I)
 TREE_GLYPHS = set(" \t│├└─┬┼┊┆|`+")
 PROMPT = re.compile(r"^\s*(?:\$|>|%|PS[^>]*>|[A-Za-z]:\\[^>]*>)\s+")
 
@@ -229,6 +230,8 @@ class Extractor:
             if h.line in doc.ignored:
                 continue
             m = VERSION_IN_HEADING.search(h.text)
+            if m and MIN_VERSION.match(h.text[m.end():]):
+                m = None        # `(OpenCode v1.2.0+)`, `3.11.0 or later`: what is needed of something, not our version
             if m and not re.search(r"change|history|release|thay[ _-]?đổi", doc.path, re.I):
                 out.append(Claim("version", m.group(1), m.group(1), doc.path, h.line, 1, "heading"))
         return out
@@ -570,6 +573,7 @@ class Extractor:
         out = []
         stack: list = []      # [(col, rel)]
         base = None
+        root = None           # the folder drawn on top (`mytool/`), when the tree has one
         # `cmd/` then `client/` both at the left edge: siblings at the top, not a root folder and its child
         tops = sum(1 for _, raw in lines if raw.strip() and raw[0] not in TREE_GLYPHS and raw[0] != "-")
         for n, raw in lines:
@@ -590,6 +594,7 @@ class Extractor:
                         base = ddir
                     else:
                         base = posixpath.join(ddir, base_name) if ddir else base_name
+                    root = base
                     continue
                 base = ddir
             while stack and stack[-1][0] >= i:
@@ -601,8 +606,10 @@ class Extractor:
             parent = stack[-1][1] if stack else base
             rel = posixpath.normpath(posixpath.join(parent, name.rstrip("/"))) if parent else name.rstrip("/")
             stack.append((i, rel))
+            top = root if root is not None else stack[0][1]
             out.append(Claim("path", name, rel, doc.path, n, i + 1, "tree",
-                             {"strength": 2, "anchor": "exact", "dir": name.endswith("/")}))
+                             {"strength": 2, "anchor": "exact", "dir": name.endswith("/"), "top": top,
+                              "sub": "" if rel == top else rel[len(top) + 1:] if rel.startswith(top + "/") else rel}))
         return out
 
     # -- links -------------------------------------------------------------
