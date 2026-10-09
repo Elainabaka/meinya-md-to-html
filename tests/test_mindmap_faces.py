@@ -400,3 +400,26 @@ def test_git_never_reads_the_input_of_the_tool(repo, patient):
     # the MCP server speaks its protocol on stdin: a git that read there would eat a message, or wait for one
     empty = b"e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
     assert (patient.run_git(["hash-object", "--stdin"], repo.root, timeout=20) or b"").strip() == empty
+
+
+def test_the_command_line_reports_guesses_as_notes_unless_all(repo, capsys):
+    # `build_index()` gone from the code is a reading of the text (a guess); a link to a page that never was is a
+    # fact. People and CI get the facts; --all, agents (MCP, hook) and the app get both
+    from mindmap import cli as mindmap_cli
+    from mindmap.mcp import Server
+    repo.write("src/app.py", "def keep():\n    return 2\n")
+    repo.write("AGENTS.md", "# Agents\n\nCall `build_index()` before `keep()`.\nSee [guide](docs/guide.md), [setup](docs/setup.md).\n")
+    repo.commit("drop build_index")
+
+    def found(*args):
+        assert mindmap_cli.main(["check", str(repo.root), "--format", "json", "--severity", "info",
+                                 "--fail-on", "never", *args]) == 0
+        return {f["rule"]: f["severity"] for f in json.loads(capsys.readouterr().out)["findings"]}
+
+    sure = found()
+    assert sure["symbol-gone"] == "info" and sure["link-broken"] in ("error", "warning")
+    assert found("--all")["symbol-gone"] == "warning"
+    assert mindmap_cli.main(["check", str(repo.root), "--fail-on", "warning"]) == 1      # the link still fails CI
+    assert "1 guess shown as info (--all)" in capsys.readouterr().out
+    said = call(Server(repo.root), "tools/call", {"name": "check", "arguments": {}})["result"]["structuredContent"]
+    assert {f["rule"]: f["severity"] for f in said["findings"]}["symbol-gone"] == "warning"

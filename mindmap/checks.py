@@ -95,6 +95,7 @@ COMMON_NAMES = set(
     "templates tools core common api models views components".split())
 SITE_PAGE_EXT = (".md", ".mdx", ".markdown", ".rst", ".html", ".htm", ".ipynb", ".qmd")
 SITE_INDEX = ("index", "readme", "_index")      # the page a site serves at the folder's own address
+QUEUE_TEXT = (".md", ".mdx", ".markdown", ".rst", ".adoc", ".txt")   # what work items are written in
 SUBCOMMAND_DEF = re.compile(
     r"add_parser\(\s*[\"']([^\"']+)[\"']"
     r"|@\w+(?:\.\w+)*\.command\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']"
@@ -190,6 +191,9 @@ class Checker:
         self._ignore_rules: dict[str, list] = {}
         self._path_strings: set[str] | None = None
         self._manifest_texts: list | None = None
+        self._queues: dict[str, bool] = {}
+        self._other_projects: dict[str, bool] = {}
+        self._own_names: set | None = None
 
     # -- helpers -------------------------------------------------------------
     def git_for(self, rel: str) -> Git | None:
@@ -646,6 +650,62 @@ class Checker:
         return bool(c.extra.get("dir") or c.target.endswith("/")) and any(
             self._ignored_path(p, True) for p in self._cands(c) if not p.startswith(".."))
 
+    def _work_queue(self, hist, path: str) -> bool:
+        """The path is, or lies in, a folder of work items (`openspec/changes/<id>/`): an item waits there while
+        in progress and leaves when done, and git keeps no empty folder, so the folder is gone whenever nothing is
+        in progress. Told apart from a folder dropped, moved or emptied in a commit or two, and from code that
+        moved bit by bit: items left in at least three commits, new items kept arriving after the first one had
+        left, and most files there were written text."""
+        d = path.rstrip("/")
+        while d:
+            if d not in self._queues:
+                queue = False
+                files = hist.under.get(d, ())
+                if d not in self.inv.dir_set and files and 2 * sum(
+                        1 for f in files if f.lower().endswith(QUEUE_TEXT)) >= len(files):
+                    arrived: dict = {}          # item -> position of its first add (larger is older)
+                    left: dict = {}             # item -> position of its last delete
+                    for f in hist.under[d]:
+                        item = f[len(d) + 1:].split("/", 1)[0]
+                        for pos, kind, _ in hist.events[f]:
+                            if kind == "A":
+                                arrived[item] = max(arrived.get(item, pos), pos)
+                            elif kind == "D":
+                                left[item] = min(left.get(item, pos), pos)
+                    queue = len(set(left.values())) >= 3 and sum(
+                        1 for pos in arrived.values() if pos < max(left.values())) >= 2
+                self._queues[d] = queue
+            if self._queues[d]:
+                return True
+            d = posixpath.dirname(d)
+        return False
+
+    def _other_project(self, doc: str) -> bool:
+        """The doc, or the skill it belongs to, has the reader clone another project and enter it (`git clone
+        …/torchtitan`, `cd torchtitan`): the scripts its commands name are that project's. Entering a clone of
+        this very repo is no such move."""
+        root = posixpath.dirname(doc)
+        while root and f"{root}/SKILL.md" not in self.inv.file_set:
+            root = posixpath.dirname(root)
+        key = root or doc
+        if key not in self._other_projects:
+            if self._own_names is None:
+                self._own_names = {self.inv.root.name.lower()}
+                for git in self.gits.values():
+                    url = git._git(["config", "--get", "remote.origin.url"], timeout=20) or b""
+                    name = url.decode("utf-8", "replace").strip().rstrip("/").rsplit("/", 1)[-1]
+                    self._own_names.add(name.rsplit(":", 1)[-1].removesuffix(".git").lower())
+            elsewhere = False
+            for p in ([p for p in self.inv.docs if p.startswith(root + "/")] if root else [doc]):
+                d = self.docs.get(p)
+                if d is None and self.load_doc is not None:
+                    d = self.load_doc(p)
+                if d is not None and any(posixpath.basename(e).lower() not in self._own_names for e in d.entered):
+                    elsewhere = True
+                    break
+            self._other_projects[key] = elsewhere
+        return self._other_projects[key]
+
     def _anchor(self, c: Claim, target: str) -> None:
         anchor = c.extra.get("anchor", "")
         if not anchor or not target.lower().endswith((".md", ".markdown", ".mdx")):
@@ -767,7 +827,13 @@ class Checker:
         if c.kind != "link" and FOR_READER.search(self.sentence(c)):
             c.status = "unverified"
             return
+        if hist is not None and hist.ok and any(self._work_queue(hist, p) for p in ever):
+            c.status = "skipped"            # empty while no work is in progress
+            return
         if not ever:
+            if c.kind == "command" and self._other_project(c.doc):
+                c.status = "unverified"     # a script of the project the reader cloned; one this repo had stays
+                return
             self._never(c)
             return
         rule = {"link": "link-broken", "command": "command-missing"}.get(c.kind, "path-moved")

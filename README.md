@@ -52,7 +52,8 @@ For the page in the picture, add `--format html --out report.html`. It is one fi
 1. **Every finding carries its proof.** A file and line, or a commit id with its date and subject. You can check the checker.
 2. **It reads history.** For each doc line it asks git when the line was written and what the repo held at that commit. "This file was here when you wrote the line, and commit `b81c7e1` moved it" is an error. "This name was never in the repo" is usually an example, another project or the reader's own file, so it stays quiet.
 3. **No proof, no warning.** Plans, changelogs, decision logs and dated posts describe another time on purpose; they are read with looser rules. Findings come in three levels and the lowest one, notes, is hidden unless you ask.
-4. **It only reads.** It never edits a doc or a file of code, never runs code from the repo it checks, and never opens files that usually hold secrets.
+4. **Facts by default, guesses on request.** Some findings rest on a fact of the repo (a link to a file that is not there, a file git saw deleted, a script `package.json` does not have). Others rest on a reading of the text (a name that seems gone, a path that seems made up), and on repos we had never seen those were wrong more often than right. On the command line, in CI and in pre-commit, the second kind are notes unless you pass `--all`. Coding agents (MCP and the hook) get both, with a line asking them to read each one in context: in our test an agent left every false alarm alone.
+5. **It only reads.** It never edits a doc or a file of code, never runs code from the repo it checks, and never opens files that usually hold secrets.
 
 ## What it checks
 
@@ -69,6 +70,8 @@ For the page in the picture, add `--format html --out report.html`. It is one fi
 | the same sentence in two docs, with different numbers | each other | `copies-diverged` |
 | a rule, with a pattern beside it (see below) | the code | `rule-violation` |
 | a table | its own shape | `table-shape`, `table-orphan` |
+
+Guesses, notes on the command line unless `--all`: `symbol-gone`, `symbol-removed-now`, `path-missing`, `path-typo`, `make-target-missing`, `subcommand-missing`, `decision-unknown`, `copies-diverged`, `version-mismatch`, `dep-mismatch`.
 
 Notes, shown with `--severity info`: `stale-risk` (the code a doc describes changed after the doc), `link-unverified` and `anchor-unverified` (an address only the built site can confirm), `foreign-links` (a doc copied in from another project).
 
@@ -199,9 +202,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0    # the whole history: Mind Map reads it
-      - uses: Elainabaka/meinya-mind-map@v0.1.0
+      - uses: Elainabaka/meinya-mind-map@v1.0.0
         with:
           fail-on: error
+          # args: --all     # also the guesses (a name or path that seems gone or made up)
 ```
 
 As a pre-commit hook:
@@ -209,7 +213,7 @@ As a pre-commit hook:
 ```yaml
 repos:
   - repo: https://github.com/Elainabaka/meinya-mind-map
-    rev: v0.1.0
+    rev: v1.0.0
     hooks:
       - id: mindmap
 ```
@@ -221,7 +225,7 @@ For code scanning, `mindmap check . --format sarif --out mindmap.sarif`. Other f
 | Need | How |
 |---|---|
 | Start on an old repo without fixing everything first | `mindmap check . --update-baseline` records today's findings in `.mindmap-baseline.json`; from then on `--baseline .mindmap-baseline.json` shows only new ones |
-| Show more, or fail earlier | `--severity info` shows notes; `--fail-on warning` makes warnings fail the run |
+| Show more, or fail earlier | `--severity info` shows notes; `--all` turns the guesses back into warnings; `--fail-on warning` makes warnings fail the run |
 | Skip a folder | `--exclude "vendor/**"`, or `exclude = ["vendor/**"]` in `.mindmap.toml` |
 | Silence one line, a block or a file | `<!-- mindmap: ignore -->` at the end of the line, `ignore-start` and `ignore-end` around a block, `ignore-file` anywhere in the doc |
 | Tell it how to read a doc | `live`, `plans`, `history` lists of globs in `.mindmap.toml` (or under `[tool.mindmap]` in `pyproject.toml`), or `<!-- mindmap: history -->` (or `plan`, `live`) anywhere in the doc, which wins over both. A history doc (an old prompt, a pasted chat) keeps only its decision ids checked |
@@ -266,6 +270,10 @@ A second experiment: rename one class in starlette (`CORSMiddleware` to `CorsMid
 
 **Thirteen more, never seen before (October 9, night).** Picked the same way: 3 in Python, 2 in Go, 2 in Rust, 2 in TypeScript, 1 each in JavaScript, Dart and Kotlin. The first run still missed the bar: 62 errors and warnings, 35 real, 27 false. 15 of the 27 came from one file tree drawn from the folder that holds the clone (`ocmonitor/ocmonitor/cli.py`, read from the wrong root); without it, 12 false out of 47. The others: names from an SDK that moved to its own repo and is now installed from there, build folders a `.gitignore` names (`/src/generated/prisma`), file names that are string keys of a project template, a dated experiment record (`**Date**: 2026-07-11` under its title), a requirement read as our version (`OpenCode v1.2.0+`), and a Makefile target defined in another Makefile (left as is: a real finding of the same kind sits in another Makefile too). After the fixes: 37, of which 35 are real (none lost), 2 false. Rerun on every older set, the fixes lost no real finding and turned up 12 real ones the tool had missed, all in trees drawn from the repo's own folder (`holy-grail/` on top, then `claude/agents/`, deleted in January). One bug found on the way: a long base64 string in code made the main branch of the evening before (not 0.1.0) run out of memory on a big workspace; strings over 400 characters are no longer read as paths.
 
+**Three first runs failed, so what does the default show?** Counted by finding id over the first runs of the last three sets, the guesses were right 38 times and wrong 112 times; the facts were right 64 times and wrong 12 (7 of those from 0.1.0). So from 1.0 the command line reports facts and keeps guesses as notes (`--all` shows them). Counted that way, the first runs of sets C and D would have given 2 false out of 27 and 0 out of 20; but that split was chosen after seeing them, so it had to face one more set.
+
+**Thirteen more, never seen before, picked by a script (October 9, night).** No agent this time: a script took repos with an AGENTS.md or CLAUDE.md from GitHub search, in a fixed random order, and kept the first 13 that met the same rules (C, C++, Scala, Python, TypeScript 2, Swift 2, Lua, Java 2, Rust, CSS). Mind Map 1.0's default, first run: 61 errors and warnings, 34 real, 24 false, 3 arguable. **It missed the bar again**, but all 24 came from two repos and three causes: a folder of work items that git drops whenever no work is in progress (`openspec/changes/<id>/`: 9), numbered feature specs that describe their own day (`specs/001-…/`, as spec-kit makes them: 9), and pages of a skill that has the reader clone another project and run its scripts (`git clone …/torchtitan`, `cd torchtitan`: 6). After those fixes: 38, of which 34 are real (none lost), 1 false, 3 arguable; one repo with 1,043 docs gave 29 of them. The other twelve gave 9: 8 real, 1 arguable. Rerun on every older set, the first try of the work-items rule hid 9 real findings (folders of code moved or dropped in a few commits, like `sdk/`); it now also needs items to leave in three or more commits and to be mostly written text, and the older sets come out as before.
+
 **Does an agent need a separate AI judge?** The same 81 findings were handed to a small model (Haiku 5.5) acting as the user's coding agent, with the repo at hand and without the labels, as "fix the stale docs". It left alone 42 of the 43 false alarms and edited one correct line; with the note now printed under every list of findings (shown above), it left all 43 alone and fixed 30 of the 36 real ones (the other 6 it raised with the user: a tutorial to rewrite, a recipe missing from the code side). So Mind Map adds no AI step of its own: an agent that reads the line already understands it.
 
 **Same input, same report.** The JSON report for all twelve repos is identical on Windows (a machine set to UTC+7) and on Linux (UTC), down to each message and each date, and does not change with Python's hash seed.
@@ -279,7 +287,8 @@ A second experiment: rename one class in starlette (`CORSMiddleware` to `CorsMid
 - Names in code are found with a text index and patterns for definitions in more than thirty languages, not with a parser for each. A definition written in an unusual way is missed, and then Mind Map stays quiet.
 - A shallow clone has less history, so it gives fewer findings (never more). In CI, fetch the full history.
 - If git does not answer in time (each call has a hard time limit, and after three timeouts in one run it stops asking), the report says how many questions went unanswered: a `!` line, `stats.git_unanswered` in JSON, a line on stderr. Such a report may miss findings: run it again. The exit code still follows the findings only.
-- Status: 0.1.0, alpha. It needs Python 3.11 or newer; git adds the history, but a repo without it is still checked. Tested on Windows: 455 tests on Python 3.13, 356 of them for Mind Map; on Python 3.11 the Mind Map tests pass too (one is skipped: it needs 3.12). Linux (Python 3.14) was last tested with 0.1.0. Not tested yet: macOS.
+- No set of repos it had never seen has passed the bar of 1 false alarm in 10 on a first run yet (the last one: 24 in 61, all from two repos). Expect a few false alarms on a repo with habits of its own, and tell us: each one so far was a general cause, fixed once for every repo.
+- Status: 1.0.0. It needs Python 3.11 or newer; git adds the history, but a repo without it is still checked. Tested on Windows: 459 tests on Python 3.13, 360 of them for Mind Map; on Python 3.11 the Mind Map tests pass too (one is skipped: it needs 3.12). Linux (Python 3.14) was last tested with 0.1.0. Not tested yet: macOS.
 
 ## Safety
 

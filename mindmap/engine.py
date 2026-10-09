@@ -20,6 +20,13 @@ from .mdscan import scan
 from .model import ERROR, INFO, SEVERITY_RANK, WARNING
 
 CONFIG_NAMES = (".mindmap.toml", "mindmap.toml")
+# Rules whose proof is a reading of the text, not a fact of the repo (a name that seems gone, a path that seems
+# made up, a typo guess). On repos never seen before they were wrong more often than right (first runs of sets B,
+# C and D: 38 right, 112 wrong). `check` shows them as notes unless --all; agents (MCP, hook) and the app get
+# them as they are, with the note to read each line in context first.
+GUESS_RULES = frozenset({"symbol-gone", "symbol-removed-now", "path-missing", "path-typo", "make-target-missing",
+                         "subcommand-missing", "decision-unknown", "copies-diverged", "version-mismatch",
+                         "dep-mismatch"})
 
 
 @dataclass
@@ -80,9 +87,10 @@ def in_scope(path: str, focus: list | None) -> bool:
 
 def run(root, *, lang: str | None = None, use_git: bool = True, nested: bool | None = None,
         exclude: list | None = None, focus: list | None = None, baseline: Path | None = None,
-        light: bool = False) -> Result:
+        light: bool = False, sure_only: bool = False) -> Result:
     """light=True (with focus): read only the focused docs and the decision
-    logs, skip the cross-doc checks. Used by the hook and MCP for one doc."""
+    logs, skip the cross-doc checks. Used by the hook and MCP for one doc.
+    sure_only=True: findings of GUESS_RULES become notes (`stats["guesses"]` counts them)."""
     timings = {}
     t0 = time.perf_counter()
     git_trouble(reset=True)
@@ -146,6 +154,13 @@ def run(root, *, lang: str | None = None, use_git: bool = True, nested: bool | N
         suppressed = len(findings) - len(kept)
         findings = kept
 
+    guesses = 0
+    if sure_only:
+        for f in findings:
+            if f.rule in GUESS_RULES and f.severity != INFO:
+                f.severity = INFO
+                guesses += 1
+
     findings.sort(key=lambda f: (-SEVERITY_RANK[f.severity], f.path, f.line, f.col))
     doc_stats = {}
     for p, d in docs.items():
@@ -183,6 +198,7 @@ def run(root, *, lang: str | None = None, use_git: bool = True, nested: bool | N
         INFO: sum(1 for f in findings if f.severity == INFO),
         "repos": len(inv.repos), "git": bool(gits), "decisions": len(dec.items),
         "git_unanswered": sum(git_trouble().values()),      # not 0: git ran out of time, findings are missing
+        "guesses": guesses,
     }
     timings["total"] = time.perf_counter() - t0
     return Result(str(root), findings, claims, docs, doc_stats, stats, timings, suppressed, lang)

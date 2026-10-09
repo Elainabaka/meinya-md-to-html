@@ -50,7 +50,8 @@ Muốn có trang như trong ảnh, thêm `--format html --out report.html`. Tran
 1. **Phát hiện nào cũng kèm bằng chứng.** Một file và số dòng, hoặc mã commit kèm ngày và tiêu đề. Bạn kiểm lại được chính công cụ kiểm.
 2. **Nó đọc lịch sử.** Với mỗi dòng tài liệu, nó hỏi git dòng đó được viết lúc nào và ở commit đó repo có gì. "File này còn đó lúc bạn viết dòng này, và commit `b81c7e1` đã dời nó đi" là lỗi. "Tên này chưa từng có trong repo" thì thường là ví dụ, dự án khác hoặc file của chính người đọc, nên nó im lặng.
 3. **Không có bằng chứng thì không cảnh báo.** Kế hoạch, nhật ký thay đổi, sổ quyết định và bài viết có ngày tháng cố ý kể về một thời điểm khác, nên được đọc với luật lỏng hơn. Phát hiện có ba mức, mức thấp nhất (ghi chú) chỉ hiện khi bạn yêu cầu.
-4. **Nó chỉ đọc.** Nó không sửa tài liệu hay code, không chạy code của repo đang kiểm, và không mở những file thường chứa bí mật.
+4. **Mặc định chỉ báo sự thật, phỏng đoán thì phải xin.** Có loại phát hiện dựa trên sự thật của repo (link tới file không có, file mà git thấy đã xóa, script mà `package.json` không có). Có loại dựa trên việc đọc câu chữ (một tên có vẻ đã mất, một đường dẫn có vẻ bị bịa), và trên các repo chưa từng gặp, loại này nhầm nhiều hơn đúng. Khi chạy lệnh, trong CI và pre-commit, loại thứ hai chỉ là ghi chú, trừ khi thêm `--all`. Agent viết code (qua MCP và hook) thấy cả hai, kèm một dòng nhắc đọc từng cái trong ngữ cảnh: trong phép thử của chúng tôi, agent để yên mọi báo nhầm.
+5. **Nó chỉ đọc.** Nó không sửa tài liệu hay code, không chạy code của repo đang kiểm, và không mở những file thường chứa bí mật.
 
 ## Nó kiểm những gì
 
@@ -67,6 +68,8 @@ Muốn có trang như trong ảnh, thêm `--format html --out report.html`. Tran
 | cùng một câu ở hai tài liệu nhưng khác số | đối chiếu lẫn nhau | `copies-diverged` |
 | một luật, có mẫu kiểm đặt ngay bên dưới (xem dưới) | code | `rule-violation` |
 | một bảng | hình dạng của chính nó | `table-shape`, `table-orphan` |
+
+Phỏng đoán, khi chạy lệnh thì thành ghi chú trừ khi có `--all`: `symbol-gone`, `symbol-removed-now`, `path-missing`, `path-typo`, `make-target-missing`, `subcommand-missing`, `decision-unknown`, `copies-diverged`, `version-mismatch`, `dep-mismatch`.
 
 Ghi chú, hiện khi thêm `--severity info`: `stale-risk` (code mà tài liệu mô tả đã đổi sau tài liệu), `link-unverified` và `anchor-unverified` (địa chỉ chỉ site đã dựng mới xác nhận được), `foreign-links` (tài liệu chép từ dự án khác sang).
 
@@ -151,9 +154,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0    # lấy đủ lịch sử: Mind Map đọc nó
-      - uses: Elainabaka/meinya-mind-map@v0.1.0
+      - uses: Elainabaka/meinya-mind-map@v1.0.0
         with:
           fail-on: error
+          # args: --all     # thêm cả phỏng đoán (tên hay đường dẫn có vẻ đã mất hoặc bị bịa)
 ```
 
 Làm hook pre-commit:
@@ -161,7 +165,7 @@ Làm hook pre-commit:
 ```yaml
 repos:
   - repo: https://github.com/Elainabaka/meinya-mind-map
-    rev: v0.1.0
+    rev: v1.0.0
     hooks:
       - id: mindmap
 ```
@@ -173,7 +177,7 @@ Cho code scanning: `mindmap check . --format sarif --out mindmap.sarif`. Các đ
 | Cần | Cách |
 |---|---|
 | Bắt đầu trên repo cũ mà chưa phải sửa hết | `mindmap check . --update-baseline` ghi các phát hiện hôm nay vào `.mindmap-baseline.json`; từ đó thêm `--baseline .mindmap-baseline.json` để chỉ thấy cái mới |
-| Xem nhiều hơn, hoặc cho trượt sớm hơn | `--severity info` hiện cả ghi chú; `--fail-on warning` cho cảnh báo làm lượt chạy trượt |
+| Xem nhiều hơn, hoặc cho trượt sớm hơn | `--severity info` hiện cả ghi chú; `--all` đưa phỏng đoán về lại mức cảnh báo; `--fail-on warning` cho cảnh báo làm lượt chạy trượt |
 | Bỏ qua một thư mục | `--exclude "vendor/**"`, hoặc `exclude = ["vendor/**"]` trong `.mindmap.toml` |
 | Tắt cho một dòng, một đoạn, cả file | `<!-- mindmap: ignore -->` ở cuối dòng; `ignore-start` và `ignore-end` quanh một đoạn; `ignore-file` ở bất kỳ đâu trong tài liệu |
 | Nói cho nó biết đọc một tài liệu theo kiểu nào | danh sách glob `live`, `plans`, `history` trong `.mindmap.toml` (hoặc dưới `[tool.mindmap]` của `pyproject.toml`), hoặc `<!-- mindmap: history -->` (hay `plan`, `live`) ở bất kỳ đâu trong tài liệu, thắng cả hai cách trên. Tài liệu lịch sử (prompt cũ, đoạn chat dán lại) chỉ còn được soát mã quyết định |
@@ -218,6 +222,10 @@ Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddlew
 
 **Thêm mười ba repo chưa từng thấy (đêm 9/10).** Chọn cùng cách: 3 Python, 2 Go, 2 Rust, 2 TypeScript, mỗi thứ một repo JavaScript, Dart, Kotlin. Lượt đầu vẫn chưa đạt: 62 lỗi và cảnh báo, 35 đúng, 27 nhầm. 15 trong 27 đến từ một cây thư mục vẽ từ thư mục chứa bản clone (`ocmonitor/ocmonitor/cli.py`, đọc sai gốc); bỏ cây đó thì 12 nhầm trên 47. Số còn lại: tên trong một SDK đã tách sang repo riêng và giờ được cài từ đó, thư mục build mà `.gitignore` nêu (`/src/generated/prisma`), tên file là khóa chuỗi trong mẫu dự án, một bản ghi thí nghiệm có ngày (`**Date**: 2026-07-11` dưới tiêu đề), yêu cầu phiên bản bị đọc thành phiên bản của dự án (`OpenCode v1.2.0+`), một target Makefile nằm ở Makefile khác (để nguyên: một phát hiện đúng cùng kiểu cũng nằm ở Makefile khác). Vá xong: 37, trong đó 35 đúng (không mất cái nào), 2 nhầm. Chạy lại mọi bộ cũ: không mất phát hiện đúng nào, và lòi ra 12 cái đúng trước đây bị bỏ sót, đều ở cây vẽ từ chính thư mục repo (`holy-grail/` trên đỉnh, rồi `claude/agents/` đã xóa từ tháng 1). Một lỗi tìm thấy trên đường: chuỗi base64 dài trong code làm bản main của tối hôm trước (không phải 0.1.0) hết bộ nhớ trên một workspace lớn; giờ chuỗi dài hơn 400 ký tự không bị đọc thành đường dẫn.
 
+**Ba lượt đầu đều trượt, vậy mặc định nên hiện gì?** Đếm theo mã phát hiện trên lượt đầu của ba bộ gần nhất: phỏng đoán đúng 38 lần, nhầm 112 lần; sự thật đúng 64 lần, nhầm 12 (7 trong số đó của bản 0.1.0). Vì vậy từ bản 1.0, khi chạy lệnh chỉ báo sự thật, phỏng đoán giữ ở mức ghi chú (`--all` để hiện). Đếm theo cách đó, lượt đầu của bộ C và D lẽ ra chỉ nhầm 2 trên 27 và 0 trên 20; nhưng cách chia này chọn sau khi đã thấy hai bộ đó, nên phải thi thêm một bộ.
+
+**Thêm mười ba repo chưa từng thấy, do script chọn (đêm 9/10).** Lần này không dùng agent: một script lấy các repo có AGENTS.md hoặc CLAUDE.md từ tìm kiếm của GitHub, xếp ngẫu nhiên theo một hạt giống cố định, giữ 13 repo đầu tiên đạt cùng luật (C, C++, Scala, Python, TypeScript 2, Swift 2, Lua, Java 2, Rust, CSS). Mặc định của Mind Map 1.0, lượt đầu: 61 lỗi và cảnh báo, 34 đúng, 24 nhầm, 3 còn bàn được. **Lại trượt**, nhưng cả 24 đến từ hai repo và ba nguyên nhân: thư mục chứa việc đang làm mà git bỏ đi mỗi khi không còn việc nào dở (`openspec/changes/<id>/`: 9), spec đánh số theo tính năng mô tả đúng ngày của nó (`specs/001-…/`, kiểu spec-kit: 9), và các trang của một skill bảo người đọc clone dự án khác rồi chạy script của dự án đó (`git clone …/torchtitan`, `cd torchtitan`: 6). Vá xong: 38, trong đó 34 đúng (không mất cái nào), 1 nhầm, 3 còn bàn được; riêng một repo có 1.043 tài liệu cho 29 cái. Mười hai repo còn lại cho 9: 8 đúng, 1 còn bàn được. Chạy lại mọi bộ cũ: bản đầu của luật thư mục chứa việc làm im 9 phát hiện đúng (thư mục mã bị dời hay bỏ qua vài commit, như `sdk/`); giờ luật đòi thêm các mục rời đi qua ít nhất ba commit và đa số là chữ viết, các bộ cũ ra đúng như trước.
+
 **Agent có cần một bước AI phán riêng không?** Đưa đúng 81 phát hiện đó cho một model nhỏ (Haiku 5.5) đóng vai agent của người dùng, có repo trong tay, không biết nhãn, với lời dặn "sửa tài liệu cũ". Nó để yên 42 trên 43 báo nhầm và sửa một dòng đúng; khi có câu nhắc mà giờ Mind Map in dưới mọi danh sách phát hiện ("mỗi phát hiện là bằng chứng máy tìm, chưa phải phán quyết: đọc dòng tài liệu trong ngữ cảnh trước…"), nó để yên cả 43 và sửa 30 trên 36 cái đúng (6 cái kia nó báo lại người dùng: bài hướng dẫn cần viết lại, lệnh thiếu ở phía code). Vì vậy Mind Map không thêm bước AI nào của riêng nó: agent đọc dòng đó vốn đã hiểu câu.
 
 **Cùng đầu vào, cùng báo cáo.** Báo cáo JSON của cả mười hai repo giống hệt nhau trên Windows (máy đặt giờ UTC+7) và Linux (UTC), tới từng thông báo và từng ngày, và không đổi theo hash seed của Python.
@@ -231,7 +239,8 @@ Một thí nghiệm nữa: đổi tên một lớp trong starlette (`CORSMiddlew
 - Tên trong code được tìm bằng chỉ mục chữ và mẫu nhận định nghĩa cho hơn ba mươi ngôn ngữ, không phải bằng bộ phân tích riêng cho từng ngôn ngữ. Định nghĩa viết kiểu lạ sẽ bị sót, và khi đó Mind Map im lặng.
 - Bản clone nông có ít lịch sử nên ra ít phát hiện hơn (không bao giờ nhiều hơn). Trong CI hãy lấy đủ lịch sử.
 - Nếu git không trả lời kịp (mỗi lần gọi có giới hạn thời gian thật, hết giờ ba lần trong một lượt thì thôi không hỏi nữa), báo cáo ghi rõ bao nhiêu câu hỏi không được trả lời: một dòng `!`, `stats.git_unanswered` trong JSON, một dòng ở stderr. Báo cáo như vậy có thể thiếu phát hiện: hãy chạy lại. Mã thoát vẫn chỉ theo phát hiện.
-- Trạng thái: 0.1.0, bản alpha. Cần Python 3.11 trở lên; có git thì thêm lịch sử, repo không có git vẫn được soát. Đã thử trên Windows: 455 test trên Python 3.13, trong đó 356 của Mind Map; trên Python 3.11 các test Mind Map cũng xanh (bỏ qua 1 test cần 3.12). Linux (Python 3.14) mới thử tới bản 0.1.0. Chưa thử: macOS.
+- Chưa bộ repo lạ nào qua được chuẩn "lượt đầu nhầm tối đa 1 trên 10" (bộ gần nhất: 24 trên 61, đều từ hai repo). Repo có thói quen riêng có thể gặp vài báo nhầm; hãy báo cho chúng tôi: tới giờ mỗi lần đều là một nguyên nhân chung, vá một lần cho mọi repo.
+- Trạng thái: 1.0.0. Cần Python 3.11 trở lên; có git thì thêm lịch sử, repo không có git vẫn được soát. Đã thử trên Windows: 459 test trên Python 3.13, trong đó 360 của Mind Map; trên Python 3.11 các test Mind Map cũng xanh (bỏ qua 1 test cần 3.12). Linux (Python 3.14) mới thử tới bản 0.1.0. Chưa thử: macOS.
 
 ## An toàn
 

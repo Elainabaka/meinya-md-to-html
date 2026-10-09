@@ -42,7 +42,8 @@ def cmd_check(a) -> int:
         baseline = root / baseline
     res = engine.run(root, lang=a.lang, use_git=not a.no_git, nested=not a.no_nested,
                      exclude=a.exclude, focus=focus,
-                     baseline=None if a.update_baseline else baseline)
+                     baseline=None if a.update_baseline else baseline,
+                     sure_only=not (a.all or a.update_baseline))
     lang = res.lang
     if a.update_baseline:
         target = baseline or (root / ".mindmap-baseline.json")
@@ -129,6 +130,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--out", "-o", help="write the report to a file")
     c.add_argument("--severity", default="warning", choices=["error", "warning", "info"], help="lowest level to show")
     c.add_argument("--fail-on", default="error", choices=["error", "warning", "info", "never"])
+    c.add_argument("--all", action="store_true",
+                   help="also report the findings that are a reading of the text (a name or a path that seems "
+                        "gone or made up), shown as notes otherwise")
     c.add_argument("--lang", choices=["en", "vi"], help="message language (default: config or en)")
     c.add_argument("--baseline", help="ignore findings recorded in this file")
     c.add_argument("--update-baseline", action="store_true", help="record current findings as the baseline")

@@ -35,10 +35,11 @@ POST_DIR = re.compile(r"(?:^|/)(?:blogs?|news|posts|_posts|articles|announcement
 PLAN_NAME = re.compile(
     r"(?:^|[_\-. ])(?:plan|plans|proposal|rfc|draft|todo|ideas?|spike|brainstorm|wip|"
     r"ke[-_ ]?hoach|de[-_ ]?xuat|y[-_ ]?tuong|phieu|brief)(?:[_\-. \d]|$)", re.I)
-PLAN_PATH = re.compile(r"(?:^|/)(?:tasks?|tickets?|plans?|proposals?|rfcs?|drafts?|ideas?|y[-_]?tuong|backlog|todos?|wip|in[-_]?progress|planned|upcoming)/|(?:^|/)T\d+[a-z]?[-_][^/]*$", re.I)
+PLAN_PATH = re.compile(r"(?:^|/)(?:tasks?|tickets?|plans?|proposals?|rfcs?|drafts?|ideas?|y[-_]?tuong|backlog|todos?|wip|in[-_]?progress|planned|upcoming)/|(?:^|/)T\d+[a-z]?[-_][^/]*$"
+                       r"|(?:^|/)specs?/\d{2,4}[-_][^/]+/", re.I)        # spec-kit: one numbered folder per feature
 DATED_NAME = re.compile(r"^\d{4}-\d{2}-\d{2}")
 STATUS_LINE = re.compile(
-    r"^\s{0,3}(?:\*\*|__)?status(?:\*\*|__)?\s*[:—–-]\s*(?:\*\*|__)?\s*[\"']?"
+    r"^\s{0,3}(?:\|\s*)?(?:\*\*|__)?status(?:\*\*|__)?\s*(?:[:—–-]|\|)\s*(?:\*\*|__)?\s*[\"']?"   # or `| Status | Proposed |`
     r"(done|implemented|completed|shipped|superseded|obsolete|deprecated|archived|rejected|withdrawn|accepted|"
     r"draft|proposed|planned|in\s+progress|wip|approved)\b", re.I)
 PLAN_STATUS = {"draft", "proposed", "planned", "in progress", "wip", "approved"}

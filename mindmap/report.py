@@ -81,6 +81,9 @@ def text(result, findings: list, lang: str = "en", color: bool | None = None, st
                    f"{result.timings.get('total', 0):.1f}s")
     if result.suppressed:
         summary += f" · baseline: {result.suppressed}"
+    if s.get("guesses"):
+        summary += (f" · {s['guesses']} phỏng đoán thành ghi nhận (--all để xem)" if lang == "vi"
+                    else f" · {s['guesses']} guess{'' if s['guesses'] == 1 else 'es'} shown as info (--all)")
     out.append("")
     note = incomplete(result, lang)
     if note:

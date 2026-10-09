@@ -156,6 +156,7 @@ class Doc:
     kind_mark: str = ""          # `<!-- mindmap: history -->` (or plan, live): how to read this doc
     anchors: set = field(default_factory=set)
     imports: list[str] = field(default_factory=list)
+    entered: set = field(default_factory=set)   # folders the reader clones and enters (`git clone …/x`, `cd x`)
 
     def line_text(self, n: int) -> str:
         return self.lines[n - 1] if 0 < n <= len(self.lines) else ""
@@ -333,6 +334,7 @@ def scan(path: str, text: str) -> Doc:
                         cloned.add(directory)
                     change = CLONE_CD.fullmatch(command)
                     if change and posixpath.normpath(change.group(1).strip("\"'").replace("\\", "/")) in cloned:
+                        doc.entered.add(posixpath.normpath(change.group(1).strip("\"'").replace("\\", "/")))
                         continue
                     fence.lines.append((n, command))
             continue

@@ -995,3 +995,58 @@ def test_a_removed_folder_stays_stale_under_a_gitignore_saved_with_crlf(repo):
     repo.commit("drop requirements")
     assert repo.git("check-ignore", "cmd/requirements/").strip() == "cmd/requirements/"      # the trap
     assert [f.claim for f in run(repo).findings if f.severity != "info"] == ["requirements/"]
+
+
+def test_a_folder_of_work_items_that_is_empty_now_is_no_finding(repo):
+    # `openspec/changes/<id>/`: a change waits there while in progress and leaves when merged, and git keeps no
+    # empty folder. A folder dropped in one go (`notes/`), or code emptied bit by bit with items added between
+    # (`sdk/`), is still reported
+    repo.write("docs/FLOW.md", "# Flow\n\nPut each change in `openspec/changes/`, the notes in `notes/`, the "
+                               "clients in `sdk/`.\n")
+    for name in ("setup", "deploy", "review"):
+        repo.write(f"notes/{name}.md", f"# {name}\n")
+        repo.write(f"sdk/{name}/index.ts", "x\n")
+    repo.write("openspec/changes/add-login/proposal.md", "a\n").commit("add login")
+    repo.write("openspec/changes/add-search/proposal.md", "b\n").commit("add search")
+    repo.git("rm", "-q", "-r", "openspec/changes/add-login", "sdk/setup")
+    repo.commit("merge login, move a client")
+    repo.write("openspec/changes/add-export/proposal.md", "c\n").write("sdk/python/a.py", "x\n")
+    repo.write("sdk/go/a.go", "x\n").commit("add export and two clients")
+    repo.git("rm", "-q", "-r", "openspec/changes/add-search", "sdk/deploy")
+    repo.commit("merge search, move a client")
+    repo.write("openspec/changes/add-import/proposal.md", "d\n").commit("add import")
+    repo.git("rm", "-q", "-r", "openspec/changes", "notes", "sdk")
+    repo.commit("merge the rest, drop the notes and the clients")
+    assert {f.claim for f in run(repo).findings if f.severity != "info"} == {"notes/", "sdk/"}
+
+
+def test_numbered_feature_specs_and_a_status_table_are_plans():
+    # spec-kit keeps one numbered folder per feature (`specs/001-login/`): written before the code, as of its day.
+    # An ADR may give its status in a table row
+    from mindmap.doctype import classify
+    assert classify("specs/001-gap-analysis/006-checkpoints/001-overview.md") == "plan"
+    assert classify("specs/06-feature-06/06-feature-06-07-security.md") == "plan"
+    assert classify("specs/api.md") == "live"
+    assert classify("docs/adr-7.md", lines=["# ADR 7", "", "| Field | Value |", "|---|---|", "| Status | Proposed |"]) == "plan"
+    assert classify("docs/adr-8.md", lines=["# ADR 8", "", "| Status | Description |", "|---|---|"]) == "live"
+
+
+def test_commands_after_cloning_another_project_are_its_own(repo):
+    # a skill that has the reader clone torchtitan and enter it runs torchtitan's scripts, on its other pages too.
+    # A script this repo had (`tools/fetch.sh`), a skill whose own scripts are missing, or a README that clones
+    # this very repo, is still checked
+    repo.write("skills/titan/tools/fetch.sh", "echo\n")
+    repo.write("skills/titan/SKILL.md", "# Titan\n\n```bash\ngit clone https://github.com/pytorch/torchtitan\n"
+               "cd torchtitan\n```\n\nThen:\n\n```bash\npython scripts/download_hf_assets.py --repo x\n"
+               "bash tools/fetch.sh\n```\n")
+    repo.write("skills/titan/references/ckpt.md", "# Checkpoints\n\n```bash\npython ./scripts/convert_from_hf.py a b\n```\n")
+    repo.write("skills/titan/scripts/notes.py", "print(1)\n")
+    repo.write("skills/deck/SKILL.md", "# Deck\n\n```bash\npython scripts/thumbnail.py deck.pptx\n```\n")
+    repo.write("skills/deck/scripts/build.py", "print(1)\n")
+    repo.write("README.md", f"# Tool\n\n```bash\ngit clone https://github.com/acme/{repo.root.name}\n"
+               f"cd {repo.root.name}\n```\n\n```bash\npython tools/setup.py\n```\n")
+    repo.write("tools/run.py", "print(1)\n").commit("skills")
+    repo.git("rm", "-q", "skills/titan/tools/fetch.sh")
+    repo.commit("drop fetch")
+    assert sorted(f.claim for f in run(repo).findings if f.rule == "command-missing") == [
+        "scripts/thumbnail.py", "tools/fetch.sh", "tools/setup.py"]

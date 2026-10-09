@@ -7,4 +7,4 @@ against the working tree and git history. The machine finds evidence; an AI
 (if any) only explains and fixes.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
